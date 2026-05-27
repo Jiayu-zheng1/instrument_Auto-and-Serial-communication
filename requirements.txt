@@ -1,0 +1,7 @@
+loguru
+urllib3
+serial
+pyserial
+pyqt5
+pyvisa
+pyvisa-py
