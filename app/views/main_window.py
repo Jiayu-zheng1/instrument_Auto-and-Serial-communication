@@ -185,6 +185,7 @@ class MainWindow(QMainWindow):
         self.control_bar.start_btn.clicked.connect(self._start_test)
         self.control_bar.sn_input.returnPressed.connect(self._start_test)
         self.control_bar.signal_gear_clicked.connect(self._show_instrument_settings)
+        self._instr_mgr.signal_device_status.connect(self.control_bar.set_device_status)
         self._instr_mgr.signal_all_checked.connect(self._on_all_instruments_checked)
 
     def _show_instrument_settings(self):
@@ -192,6 +193,7 @@ class MainWindow(QMainWindow):
         if self._instr_dialog is None:
             dlg = InstrumentSettingsDialog(self)
             dlg.signal_reconnect.connect(self._on_instr_reconnect)
+            dlg.signal_disconnect.connect(self._on_instr_disconnect)
             self._instr_mgr.signal_device_status.connect(dlg.set_device_status)
             self._instr_dialog = dlg
         self._instr_dialog.show()
@@ -199,11 +201,15 @@ class MainWindow(QMainWindow):
         self._instr_dialog.activateWindow()
 
     def _on_instr_reconnect(self, device_name: str):
-        """重连指定仪器。空字符串 = 全部重连。"""
+        """重连指定仪器。"""
         if device_name:
             self._instr_mgr.reconnect_device(device_name)
         else:
             self._instr_mgr.reconnect_all()
+
+    def _on_instr_disconnect(self, device_name: str):
+        """断开指定仪器。"""
+        self._instr_mgr.disconnect_device(device_name)
 
     def _on_all_instruments_checked(self):
         mgr = self._instr_mgr

@@ -73,8 +73,14 @@ class TestItem:
         for cmd in self._as_list(config.get("pre_cmds")):
             self.dut.send_cmd(cmd)
 
-        cmd = config.get("cmd") or config.get("command") or config.get("instruction")
-        data = self.dut.read_Write(cmd) if cmd else ""
+        hex_cmd = config.get("hex_cmd")
+        if hex_cmd:
+            data = self.dut.send_hex_cmd(hex_cmd)
+        else:
+            cmd = (
+                config.get("cmd") or config.get("command") or config.get("instruction")
+            )
+            data = self.dut.read_Write(cmd) if cmd else ""
 
         delay = config.get("delay")
         if delay:
@@ -139,6 +145,8 @@ class TestItem:
         if isinstance(value, list):
             return value
         return [value]
+
+    # ── 原有 DUT 方法 ────────────────────────────────────────────────
 
     def Check_FGSN(self):
         fgsn = ""

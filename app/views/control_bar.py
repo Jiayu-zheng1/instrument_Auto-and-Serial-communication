@@ -1,4 +1,4 @@
-"""HIG-styled control bar — SN input, Start button, timer, logo, instrument gear."""
+"""HIG-styled control bar — SN input, Start button, timer, logo, instrument gear, 仪器状态。"""
 from PyQt5.QtWidgets import (
     QWidget, QHBoxLayout, QLineEdit, QPushButton, QLabel, QFrame, QTextEdit
 )
@@ -10,6 +10,8 @@ from app.views.theme import (
     BUTTON_HEIGHT, INPUT_HEIGHT, ELEMENT_GAP, MARGIN, BORDER_RADIUS
 )
 from app.utils.constants import SN_MAX_LENGTH
+
+STATUS_LABELS = {"34970A": "34970A", "IT6382": "IT6382", "Relayboard": "Relay"}
 
 
 class ControlBar(QWidget):
@@ -23,6 +25,7 @@ class ControlBar(QWidget):
         self._timer = QTimer()
         self._timer.setInterval(100)
         self._timer.timeout.connect(self._tick)
+        self._status_labels: dict[str, tuple[QLabel, QLabel]] = {}  # name → (dot, name_label)
         self._setup()
 
     def _setup(self):
@@ -40,12 +43,29 @@ class ControlBar(QWidget):
 
         # Logo
         self.logo_label = QLabel()
-        logo_path = os.path.join(os.path.dirname(__file__), "..", "..", "resources", "logo.png")
+        logo_path = os.path.join(os.path.dirname(__file__), "..", "..", "resources", "logo_foxlink_b.png")
         if os.path.exists(logo_path):
             pix = QPixmap(logo_path)
             if not pix.isNull():
                 self.logo_label.setPixmap(pix.scaled(160, 30, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         layout.addWidget(self.logo_label)
+
+        # ── 仪器状态圆点 (Logo 右边) ──
+        for name, label in STATUS_LABELS.items():
+            dot = QLabel("●")
+            dot.setFixedWidth(18)
+            dot.setAlignment(Qt.AlignCenter)
+            dot.setStyleSheet(f"color: {Colors.TEXT_TERTIARY}; font-size: 12px;")
+            layout.addWidget(dot)
+
+            lbl = QLabel(label)
+            lbl.setFont(self._font(*FONT_BODY))
+            lbl.setStyleSheet(f"color: {Colors.TEXT_TERTIARY};")
+            layout.addWidget(lbl)
+
+            self._status_labels[name] = (dot, lbl)
+
+        layout.addSpacing(12)
 
         layout.addStretch()
 
@@ -143,6 +163,19 @@ class ControlBar(QWidget):
         """)
         self.gear_btn.clicked.connect(self.signal_gear_clicked.emit)
         layout.addWidget(self.gear_btn)
+
+    def set_device_status(self, device_name: str, connected: bool, detail: str):
+        """更新主页仪器状态圆点。"""
+        pair = self._status_labels.get(device_name)
+        if not pair:
+            return
+        dot, lbl = pair
+        if connected:
+            dot.setStyleSheet(f"color: {Colors.SUCCESS}; font-size: 14px;")
+            lbl.setStyleSheet(f"color: {Colors.SUCCESS}; font-weight: 600;")
+        else:
+            dot.setStyleSheet(f"color: {Colors.TEXT_TERTIARY}; font-size: 14px;")
+            lbl.setStyleSheet(f"color: {Colors.TEXT_TERTIARY};")
 
     def _tick(self):
         self._elapsed += 0.1

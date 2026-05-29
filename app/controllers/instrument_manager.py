@@ -18,7 +18,9 @@ DEFAULT_CONFIG = {
     "dmm_mode": "usb",                     # "usb" | "gpib"
     "dmm_port": "/dev/cu.usbserial-FTDH1RD8",  # 34970A USB 串口路径
     "dmm_gpib": "11",                       # 34970A GPIB 地址
+    "ps_mode": "gpib",                      # "usb" | "gpib"
     "ps_port": "8",                         # IT6382 GPIB 地址
+    "ps_usb_port": "",                      # IT6382 USB 串口路径
     "relay_port": "/dev/cu.usbserial-AL02P374",  # Relayboard 串口路径
     "relay_version": "0",
 }
@@ -183,12 +185,20 @@ class InstrumentManager(QObject):
             logger.error(f"34970A 检测异常: {e}")
 
     def _check_it6382(self):
-        port = self._config["ps_port"]
-        self.signal_device_status.emit("IT6382", False, f"检测中 (GPIB:{port})...")
-        logger.info(f"检查 IT6382 (GPIB:{port})...")
+        mode = self._config.get("ps_mode", "gpib")
+        if mode == "usb":
+            port = self._config.get("ps_usb_port", "")
+            label = f"USB:{port}" if port else "USB (auto)"
+        else:
+            port = self._config["ps_port"]
+            label = f"GPIB:{port}"
+
+        self.signal_device_status.emit("IT6382", False, f"检测中 ({label})...")
+        logger.info(f"检查 IT6382 ({label})...")
 
         try:
-            ps = IT6382(port)
+            gpibid = port if mode == "gpib" else None
+            ps = IT6382(gpibid) if gpibid else IT6382("")
             if ps.ps_instrument():
                 idn = ps.query_IDN() or "IDN 查询失败"
                 self._ps = ps
@@ -241,6 +251,18 @@ class InstrumentManager(QObject):
         elif device_name == "Relayboard":
             self._disconnect_relay()
             self._check_relayboard()
+
+    def disconnect_device(self, device_name: str):
+        """断开指定仪器并通知 UI。"""
+        if device_name == "34970A":
+            self._disconnect_dmm()
+            self.signal_device_status.emit("34970A", False, "已断开")
+        elif device_name == "IT6382":
+            self._disconnect_ps()
+            self.signal_device_status.emit("IT6382", False, "已断开")
+        elif device_name == "Relayboard":
+            self._disconnect_relay()
+            self.signal_device_status.emit("Relayboard", False, "已断开")
 
     def reconnect_all(self):
         """断开并重新检测所有仪器。"""

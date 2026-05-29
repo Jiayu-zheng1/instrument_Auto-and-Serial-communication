@@ -98,9 +98,9 @@ class _DarkColors:
 
 
 def _resolve():
-    dark = _is_dark_mode()
-    base = _DarkColors if dark else _LightColors
-    base.PRIMARY        = _accent_color()
+    # 锁定浅色主题，不随系统 Dark Mode 变化
+    base = _LightColors
+    base.PRIMARY        = "#007AFF"
     base.PRIMARY_HOVER  = _darken(base.PRIMARY, 0.15)
     return base
 

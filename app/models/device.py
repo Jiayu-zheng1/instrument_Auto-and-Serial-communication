@@ -56,3 +56,13 @@ class Device:
         self.send_cmd(cmd)
         time.sleep(0.01)
         return self.read_cmd()
+
+    def send_hex_cmd(self, hex_str: str) -> str:
+        """发送 Hex 指令并返回原始 Hex 返回值（不做 ASCII 转换）。"""
+        self.ser.reset_input_buffer()
+        raw = hex_str.strip().replace(" ", "")
+        data = bytes.fromhex(raw)
+        self.ser.write(data)
+        time.sleep(0.05)
+        rx = self.ser.read_all()
+        return ' '.join(f'{b:02X}' for b in rx) if rx else ""
