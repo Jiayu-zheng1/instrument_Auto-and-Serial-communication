@@ -7,8 +7,9 @@ from loguru import logger
 class TestConfig:
     """Parsed state from a Limits.csv row."""
 
-    def __init__(self, test_item: str, lower_limit: str, upper_limit: str, config: dict):
-        self.test_item = test_item
+    def __init__(self, test_item: str, test_name: str, lower_limit: str, upper_limit: str, config: dict):
+        self.test_item = test_item      # 表格显示名
+        self.test_name = test_name      # TestItem 方法名
         self.lower_limit_raw = lower_limit
         self.upper_limit_raw = upper_limit
         self.config = config
@@ -29,7 +30,9 @@ class TestConfig:
         """判定 value 是否在 limit 范围内。
 
         返回 (是否通过, Pass/Fail 标签)。
-        特殊 limit：No Empty 检查 value 非空，PASSED/ON/True 自动通过。
+        特殊 limit：
+        - No Empty：检查 value 非空
+        - PASSED/ON/True：检查是否有失败标志（FAILED/False/None）
         数值 limit：统一转 float 做 <= 比较。
         """
         if self.is_special_limit():
@@ -37,7 +40,17 @@ class TestConfig:
             if "No Empty" in specials or "Empty" in specials:
                 ok = bool(value)
                 return ok, "Pass" if ok else "Fail"
-            # PASSED / ON / True → 自动通过
+            # PASSED / ON / True → 检查是否有失败标志
+            if value is None:
+                return False, "Fail"
+            # 显式失败标志
+            value_str = str(value).strip().upper()
+            if value_str in ("FAILED", "FAIL", "ERROR", "FALSE", "0"):
+                return False, "Fail"
+            # 布尔值 False
+            if value is False:
+                return False, "Fail"
+            # 其他情况（包括原始响应、PASSED、True 等）视为 Pass
             return True, "Pass"
 
         # 数值比较：统一转 float
@@ -59,6 +72,7 @@ def load_test_configs(csv_rows: list[dict]) -> list[TestConfig]:
             continue
         configs.append(TestConfig(
             test_item=row.get("TestItem", ""),
+            test_name=row.get("TestName", "") or row.get("TestItem", ""),
             lower_limit=row.get("LowerLimit", ""),
             upper_limit=row.get("UpperLimit", ""),
             config=_parse_config_text(row.get("config", "") or row.get("Config", "")),
@@ -69,14 +83,54 @@ def load_test_configs(csv_rows: list[dict]) -> list[TestConfig]:
 def _parse_config_text(config_text: str) -> dict:
     if not config_text:
         return {}
+
+    # 尝试 JSON 解析
     try:
         return json.loads(config_text)
     except Exception:
-        try:
-            return ast.literal_eval(config_text)
-        except Exception as e:
-            logger.info(f"Error parsing config {config_text}: {e}")
-            return {}
+        pass
+
+    # 预处理: CSV 中的 ('key':'val') 格式 -> {'key':'val'}
+    text = config_text.strip()
+    if text.startswith("(") and text.endswith(")"):
+        text = "{" + text[1:-1] + "}"
+
+    try:
+        return ast.literal_eval(text)
+    except Exception:
+        pass
+
+    # 手动解析: 支持 ('key':'val','key2':'val2') 格式
+    return _manual_parse_config(config_text)
+
+
+def _manual_parse_config(config_text: str) -> dict:
+    """手动解析配置字符串，支持 ('key':'val','key2':'val2') 格式。"""
+    result = {}
+    text = config_text.strip()
+
+    # 去掉外层括号
+    if text.startswith("(") and text.endswith(")"):
+        text = text[1:-1]
+    elif text.startswith("("):
+        text = text[1:]
+    elif text.endswith(")"):
+        text = text[:-1]
+
+    if not text:
+        return result
+
+    # 解析 'key':'val' 对
+    import re
+    pattern = r"'([^']+)'\s*:\s*'([^']*)'"
+    matches = re.findall(pattern, text)
+    for key, value in matches:
+        result[key] = value
+
+    if not result:
+        logger.info(f"Error parsing config {config_text}: no key-value pairs found")
+
+    return result
 
 
 def _limit_format(limit: str):

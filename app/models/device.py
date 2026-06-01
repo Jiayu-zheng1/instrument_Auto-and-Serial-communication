@@ -57,12 +57,19 @@ class Device:
         time.sleep(0.01)
         return self.read_cmd()
 
-    def send_hex_cmd(self, hex_str: str) -> str:
-        """发送 Hex 指令并返回原始 Hex 返回值（不做 ASCII 转换）。"""
+    def send_hex_cmd(self, hex_str: str, delay: float = 0.05) -> tuple[str, str]:
+        """发送 Hex 指令，返回 (原始hex值, ASCII解码结果)。"""
         self.ser.reset_input_buffer()
         raw = hex_str.strip().replace(" ", "")
         data = bytes.fromhex(raw)
         self.ser.write(data)
-        time.sleep(0.05)
+        time.sleep(delay)
         rx = self.ser.read_all()
-        return ' '.join(f'{b:02X}' for b in rx) if rx else ""
+        logger.info(f"send_hex_cmd sent: {hex_str}, received raw: {rx.hex()}")
+        if not rx:
+            return "", ""
+        # 原始 hex 值
+        raw_hex = rx.hex()
+        # ASCII 解码结果
+        ascii_str = "".join(chr(b) if 0x20 <= b < 0x7F else "." for b in rx)
+        return raw_hex, ascii_str

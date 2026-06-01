@@ -47,44 +47,32 @@ class TestItem:
         logger.info("连接超时")
         return False
 
-    def close_dut(self):
-        if self.dut is not None:
-            self.dut.close_port()
-            logger.info("DUT has been shut down ")
-            self.dut = None
-
-    def Info_CheckDUT(self):
-        if self.dut is None:
-            self.connent_dut()
-            if self.dut:
-                return True
-            else:
-                logger.info("DUT connection Fail")
-                return False
-
-    def run_by_config(self, test_item, config):
+    def run_read_cmd(self, method_name, config):
+        """按 config 执行测试，method_name 为 TestName（匹配 TestItem 方法）。
+        返回 (raw_hex, ascii_str, result) 元组。
+        """
         action = config.get("action", "")
         if action == "method":
-            method_name = config.get("method") or test_item
-            return getattr(self, method_name)()
+            target = config.get("method") or method_name
+            return "", "", getattr(self, target)()
         if action == "connect":
-            return "PASSED" if self.connent_dut() else "FAILED"
+            return "", "", "PASSED" if self.connent_dut() else "FAILED"
 
         for cmd in self._as_list(config.get("pre_cmds")):
             self.dut.send_cmd(cmd)
 
         hex_cmd = config.get("hex_cmd")
         if hex_cmd:
-            data = self.dut.send_hex_cmd(hex_cmd)
+            # 在发送命令前等待 delay（如果有）
+            delay = float(config.get("delay", 0.05))
+            raw_hex, data = self.dut.send_hex_cmd(hex_cmd, delay=delay)
+            logger.info(f"{method_name} raw response: {data}")
         else:
             cmd = (
                 config.get("cmd") or config.get("command") or config.get("instruction")
             )
             data = self.dut.read_Write(cmd) if cmd else ""
-
-        delay = config.get("delay")
-        if delay:
-            time.sleep(float(delay))
+            raw_hex = ""
 
         result = self._extract_config_value(data, config)
 
@@ -94,8 +82,8 @@ class TestItem:
         for cmd in self._as_list(config.get("post_cmds")):
             self.dut.send_cmd(cmd)
 
-        logger.info(f"{test_item} config result: {result}")
-        return result
+        logger.info(f"{method_name} config result: {result}")
+        return raw_hex, data, result
 
     def _extract_config_value(self, data, config):
         if data is None:
@@ -118,9 +106,12 @@ class TestItem:
 
         match_index = int(config.get("match_index", config.get("index", 0)))
         match = matches[match_index]
-        groups = config.get("groups")
+        groups = config.get("group")
         if groups:
-            value = [match.group(int(group)) for group in groups]
+            if isinstance(groups, list):
+                value = [match.group(int(group)) for group in groups]
+            else:
+                value = match.group(int(groups))
         else:
             group = int(config.get("group", config.get("position", 1)))
             value = match.group(group)
@@ -152,6 +143,7 @@ class TestItem:
         fgsn = ""
         cmd = "ds get -s SERIAL_FG"
         data = self.dut.read_Write(cmd)
+        logger.info(f"Check_FGSN raw response: {data}")
         if data:
             value = fgsnRex.search(data)
             fgsn = value.group(1)
@@ -168,6 +160,7 @@ class TestItem:
     def MCU_FW_Ver(self):
         cmd = "sys version"
         data = self.dut.read_Write(cmd)
+        logger.info(f"MCU_FW_Ver raw response: {data}")
         if data:
             value = verRex.search(data)
             return value.group(1)
@@ -176,6 +169,7 @@ class TestItem:
     def Info_UVPCheck(self):
         cmd = "stylus stats"
         data = self.dut.read_Write(cmd)
+        logger.info(f"Info_UVPCheck raw response: {data}")
         if data:
             uvpver = uvpRex.search(data).group(1)
             return uvpver
@@ -184,6 +178,7 @@ class TestItem:
     def Info_SOC(self):
         cmd = "hid -i 0 get 0x21"
         data1 = self.dut.read_Write(cmd)
+        logger.info(f"Info_SOC raw response: {data1}")
         if data1:
             socver = int(socRex.search(data1).group(3), 16)
             return socver
@@ -192,6 +187,7 @@ class TestItem:
     def BT_FW_Ver(self):
         cmd = "bt version"
         data = self.dut.read_Write(cmd)
+        logger.info(f"BT_FW_Ver raw response: {data}")
         if data:
             N = btRex.search(data).group(1)
             A = btRex.search(data).group(2)
@@ -205,6 +201,7 @@ class TestItem:
     def CheckAquilaID(self):
         self.dut.read_Write("power stim on")
         data = self.dut.read_Write("stim rev")
+        logger.info(f"CheckAquilaID raw response: {data}")
         if data:
             return AquilaRex.search(data).group(1)
         else:
@@ -214,6 +211,7 @@ class TestItem:
     def Check_HWID(self):
         cmd = "sys banner"
         data = self.dut.read_Write(cmd)
+        logger.info(f"Check_HWID raw response: {data}")
         if data:
             return hwidRex.search(data).group(1)
         else:
@@ -223,6 +221,7 @@ class TestItem:
     def Read_Voltage(self):
         cmd = "pmu status"
         data = self.dut.read_Write(cmd)
+        logger.info(f"Read_Voltage raw response: {data}")
         if data:
             return valtageRex.search(data).group(1)
         else:
@@ -232,6 +231,7 @@ class TestItem:
     def Read_Temperature(self):
         cmd = "pmu status"
         data = self.dut.read_Write(cmd)
+        logger.info(f"Read_Temperature raw response: {data}")
         if data:
             return temperatureRex.search(data).group(1)
         else:
@@ -258,6 +258,7 @@ class TestItem:
 
     def Check_Lock(self):
         result = self.dut.read_Write("ds get -s LOCK")
+        logger.info(f"Check_Lock raw response: {result}")
         lockVerMo = lockVerRex.search(result).group(1)
         logger.info(f"LockVer:{lockVerMo}")
         if lockVerMo:
@@ -271,6 +272,7 @@ class TestItem:
 
     def FinishSetting(self):
         result = self.dut.read_Write("stylus uvp")
+        logger.info(f"FinishSetting raw response: {result}")
         if "UVP mode" in result:
             logger.info("Finish Setting PASSED")
             return True
@@ -739,9 +741,46 @@ class TestItem:
         return self._ps.read_current(channel)
 
     # ═══════════════════════════════════════════════════════════════════════
-    #  Fixture 初始化 / 收尾
+    #  DUT Info 测试方法
     # ═══════════════════════════════════════════════════════════════════════
 
+    def Enable_HWID(self):
+        """启用 HWID 显示（某些机型默认隐藏）"""
+        if self.dut is None:
+            logger.info("DUT 未连接，无法启用 HWID")
+            return "FAILED"
+        hex_data, ASCII_data = self.dut.send_hex_cmd(
+            "055A2600920F41542B454750494F3D4750494F5F5345545F414C4C3A33392C302C312C312C322C300D0A",
+            delay=0.05,
+        )
+        logger.info(f"Enable_HWID raw response: {ASCII_data}")
+        if "di=1" in ASCII_data:
+            logger.info("HWID 显示已启用")
+            return "PASSED"
+        else:
+            logger.info("启用 HWID 失败")
+            return "FAILED"
+
+    def Disable_HWID(self):
+        """禁用 HWID 显示（某些机型默认显示）"""
+        if self.dut is None:
+            logger.info("DUT 未连接，无法禁用 HWID")
+            return "FAILED"
+        hexdata, ASCII_data = self.dut.send_hex_cmd(
+            "055A2600920F41542B454750494F3D4750494F5F5345545F414C4C3A33392C302C312C302C322C300D0A",
+            delay=0.05,
+        )
+        logger.info(f"Disable_HWID raw response: {ASCII_data}")
+        if "di=0" in ASCII_data:
+            logger.info("HWID 显示已禁用")
+            return "PASSED"
+        else:
+            logger.info("禁用 HWID 失败")
+            return "FAILED"
+
+    # ═══════════════════════════════════════════════════════════════════════
+    #  Fixture 初始化 / 收尾
+    # ════════════════════════════════════
     def Fixture_init(self):
         """Fixture 初始化：关闭所有电源输出 + DMM 清错 + 断开全部继电器"""
         try:

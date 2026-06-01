@@ -38,16 +38,17 @@ class TestRunner(QThread):
 
         for cfg in self.configs:
             try:
-                test_item = cfg.test_item
-                logger.info(f"Running test item: {test_item}")
-                value = self._run_one(test_item, cfg.config)
+                display = cfg.test_item      # 表格显示名
+                method = cfg.test_name       # TestItem 方法名
+                logger.info(f"Running: {display} → {method}")
+                value = self._run_one(display, method, cfg.config)
 
                 if value is not None:
-                    self._evaluate_result(test_item, str(value), cfg)
+                    self._evaluate_result(display, str(value), cfg)
                 else:
-                    self.signal_value.emit(test_item, "None")
-                    self.signal_result.emit(test_item, "Fail")
-                    self.signal_color.emit(test_item, "Fail")
+                    self.signal_value.emit(display, "None")
+                    self.signal_result.emit(display, "Fail")
+                    self.signal_color.emit(display, "Fail")
                     self._test_status = False
 
             except Exception as e:
@@ -72,12 +73,25 @@ class TestRunner(QThread):
         self.lower_limit_map = {c.test_item: c.lower_limit_raw for c in self.configs}
         self.upper_limit_map = {c.test_item: c.upper_limit_raw for c in self.configs}
 
-    def _run_one(self, test_item: str, config: dict):
-        if config:
-            value = self.test_unit.run_by_config(test_item, config)
-        else:
-            test_function = getattr(self.test_unit, test_item)
+    def _run_one(self, display: str, method: str, config: dict):
+        # run_read_cmd 是通用配置处理器，总是走它（即使 config 为空也让它自己处理）
+        if method == "run_read_cmd":
+            raw_hex, ascii_str, value = self.test_unit.run_read_cmd(method, config)
+        elif config:
+            raw_hex, ascii_str, value = self.test_unit.run_read_cmd(method, config)
+        elif hasattr(self.test_unit, method):
+            test_function = getattr(self.test_unit, method)
             value = test_function()
+            raw_hex, ascii_str = "", ""
+        else:
+            logger.info(f"No config and no method '{method}' — skipping")
+            value = None
+            raw_hex, ascii_str = "", ""
+
+        # 记录原始返回值和 ASCII 值到日志文件（仅当有 hex_cmd 时）
+        if config.get("hex_cmd") and raw_hex:
+            logger.debug(f"[{display}] raw: {raw_hex} | ascii: {ascii_str}")
+
         self._last_value = value
         return value
 

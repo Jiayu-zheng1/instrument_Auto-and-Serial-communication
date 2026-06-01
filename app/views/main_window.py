@@ -165,10 +165,28 @@ class MainWindow(QMainWindow):
             )
         try:
             with open(limits_path, "r", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                self._csv_data = [
-                    {k: (v if v else "") for k, v in row.items()} for row in reader
-                ]
+                lines = f.readlines()
+            if not lines:
+                return
+
+            # 手动解析 CSV，因为 config 列可能包含逗号
+            headers = [h.strip() for h in lines[0].split(",")]
+            self._csv_data = []
+            for line in lines[1:]:
+                line = line.strip()
+                if not line:
+                    continue
+                # 前 8 列用逗号分隔，第 9 列 (config) 取剩余部分
+                parts = line.split(",", 8)  # 最多分 8 次，得到 9 个部分
+                if len(parts) < 9:
+                    parts.extend([""] * (9 - len(parts)))
+                row = {}
+                for i, header in enumerate(headers[:8]):
+                    row[header] = parts[i].strip() if i < len(parts) else ""
+                # config 列：去掉末尾逗号
+                config_text = parts[8].strip().rstrip(",") if len(parts) > 8 else ""
+                row["config"] = config_text
+                self._csv_data.append(row)
             self.test_table.load_config(self._csv_data)
         except FileNotFoundError:
             QMessageBox.warning(
@@ -223,9 +241,9 @@ class MainWindow(QMainWindow):
 
     def _start_test(self):
         sn = self.control_bar.sn_input.text().strip()
-        if not sn:
-            QMessageBox.warning(self, "Input Required", "Please scan or enter an SN.")
-            return
+        # if not sn:
+        #     QMessageBox.warning(self, "Input Required", "Please scan or enter an SN.")
+        #     return
 
         self.control_bar.set_running(True)
         self.status_header.set_running()

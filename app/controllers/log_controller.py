@@ -36,7 +36,8 @@ class LogController:
         os.makedirs(self.log_path, exist_ok=True)
         if not self.logger_initialized:
             logger.remove()
-            logger.add(sys.stdout, format=self.FORMAT)
+            # 控制台只显示 INFO 及以上级别
+            logger.add(sys.stdout, format=self.FORMAT, level="INFO")
             self._path_logger()
             self.logger_initialized = True
 
@@ -53,8 +54,10 @@ class LogController:
             logger.remove(self.log_file_id)
         self.logname = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         self.log_file_path = os.path.join(self.log_path, f'_{self.logname}.log')
+        # 日志文件记录 DEBUG 及以上级别（包含原始返回值和 ASCII 值）
         self.log_file_id = logger.add(
-            self.log_file_path, rotation="1 day", encoding="utf-8", retention="90 days"
+            self.log_file_path, rotation="1 day", encoding="utf-8", retention="90 days",
+            level="DEBUG"
         )
 
     def bind_signal(self, log_slot):
