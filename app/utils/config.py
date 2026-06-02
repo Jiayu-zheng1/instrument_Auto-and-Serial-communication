@@ -17,9 +17,10 @@ SYSTEM_CONFIG_PATH = os.path.join(CONFIG_DIR, "system_config.json")
 DEFAULTS = {
     "log_retention_days": 90,
     "dut_baud_rate": 921600,
+    "dut_location_id": "",
+    "auto_test_mode": False,
     "fail_stop_test": True,
     "auto_scroll_log": True,
-    "auto_connect_dut": True,
     "sfc_url": "",
     "sfc_online": False,
     "sfc_vip": "",

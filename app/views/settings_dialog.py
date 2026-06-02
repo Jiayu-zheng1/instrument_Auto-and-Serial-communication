@@ -651,15 +651,26 @@ class SettingsDialog(QDialog):
         )
         self._add_card(self._baud_card)
 
-        self._auto_dut_card = _SwitchCard(
-            FluentIcon.LINK,
-            "自动连接 DUT",
-            "启动测试时自动探测并连接 DUT 串口",
+        self._location_id_card = _LineEditCard(
+            FluentIcon.PIN,
+            "DUT Location ID",
+            "USB 串口 Location ID，用于自动模式识别 DUT（可用 system_profiler SPUSBDataType 查看）",
         )
-        self._auto_dut_card.switch.setChecked(
-            self._system_config.get("auto_connect_dut", True)
+        stored_loc = self._system_config.get("dut_location_id", "")
+        if stored_loc:
+            self._location_id_card.edit.setText(stored_loc)
+        self._location_id_card.edit.setPlaceholderText("如 0x14200000")
+        self._add_card(self._location_id_card)
+
+        self._auto_test_card = _SwitchCard(
+            FluentIcon.ROBOT,
+            "自动测试模式",
+            "开启后监控 DUT 串口，检测到连接自动开始测试（无需点 Start）",
         )
-        self._add_card(self._auto_dut_card)
+        self._auto_test_card.switch.setChecked(
+            self._system_config.get("auto_test_mode", False)
+        )
+        self._add_card(self._auto_test_card)
 
         self._card_layout.addSpacing(20)
 
@@ -797,7 +808,8 @@ class SettingsDialog(QDialog):
         self._sfc_vip_card.edit.setEnabled(enabled)
         # 串口设置
         self._baud_card.combo.setEnabled(enabled)
-        self._auto_dut_card.switch.setEnabled(enabled)
+        self._location_id_card.edit.setEnabled(enabled)
+        self._auto_test_card.switch.setEnabled(enabled)
         # 通用设置
         self._fail_stop_card.switch.setEnabled(enabled)
         # 系统设置
@@ -850,11 +862,12 @@ class SettingsDialog(QDialog):
         self._system_config["sfc_online"] = self._sfc_online_card.switch.isChecked()
         self._system_config["sfc_vip"] = self._sfc_vip_card.edit.text().strip()
         self._system_config["dut_baud_rate"] = int(self._baud_card.combo.currentText())
+        self._system_config["dut_location_id"] = self._location_id_card.edit.text().strip()
+        self._system_config["auto_test_mode"] = self._auto_test_card.switch.isChecked()
         self._system_config["fail_stop_test"] = self._fail_stop_card.switch.isChecked()
         self._system_config["auto_scroll_log"] = (
             self._auto_scroll_card.switch.isChecked()
         )
-        self._system_config["auto_connect_dut"] = self._auto_dut_card.switch.isChecked()
         self._system_config["log_retention_days"] = int(
             self._log_retention_card.combo.currentText()
         )

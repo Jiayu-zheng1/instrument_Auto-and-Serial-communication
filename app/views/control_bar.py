@@ -26,7 +26,8 @@ class ControlBar(QWidget):
         self._timer = QTimer()
         self._timer.setInterval(100)
         self._timer.timeout.connect(self._tick)
-        self._status_labels: dict[str, tuple[QLabel, QLabel]] = {}  # name → (dot, name_label)
+        self._status_labels: dict[str, tuple[QLabel, QLabel]] = {}
+        self._auto_mode = False
         self._setup()
 
     def _setup(self):
@@ -51,7 +52,7 @@ class ControlBar(QWidget):
                 self.logo_label.setPixmap(pix.scaled(160, 30, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         layout.addWidget(self.logo_label)
 
-        # ── 仪器状态圆点 (Logo 右边) ──
+        # ── 仪器状态圆点 ──
         for name, label in STATUS_LABELS.items():
             dot = QLabel("●")
             dot.setFixedWidth(18)
@@ -66,8 +67,20 @@ class ControlBar(QWidget):
 
             self._status_labels[name] = (dot, lbl)
 
-        layout.addSpacing(12)
+        # DUT 状态灯
+        self.dut_dot = QLabel("●")
+        self.dut_dot.setFixedWidth(18)
+        self.dut_dot.setAlignment(Qt.AlignCenter)
+        self.dut_dot.setStyleSheet(f"color: {Colors.TEXT_TERTIARY}; font-size: 12px;")
+        self.dut_dot.setToolTip("DUT 状态")
+        layout.addWidget(self.dut_dot)
 
+        self.dut_label = QLabel("DUT")
+        self.dut_label.setFont(self._font(*FONT_BODY))
+        self.dut_label.setStyleSheet(f"color: {Colors.TEXT_TERTIARY};")
+        layout.addWidget(self.dut_label)
+
+        layout.addSpacing(12)
         layout.addStretch()
 
         # SN Label
@@ -141,7 +154,7 @@ class ControlBar(QWidget):
         self.time_display.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.time_display)
 
-        # Gear button for instrument settings
+        # Gear button
         self.gear_btn = QPushButton("⚙")
         self.gear_btn.setFixedSize(36, 36)
         self.gear_btn.setFont(self._font(*FONT_BODY))
@@ -166,7 +179,6 @@ class ControlBar(QWidget):
         layout.addWidget(self.gear_btn)
 
     def set_device_status(self, device_name: str, connected: bool, detail: str):
-        """更新主页仪器状态圆点。"""
         pair = self._status_labels.get(device_name)
         if not pair:
             return
@@ -177,6 +189,32 @@ class ControlBar(QWidget):
         else:
             dot.setStyleSheet(f"color: {Colors.TEXT_TERTIARY}; font-size: 14px;")
             lbl.setStyleSheet(f"color: {Colors.TEXT_TERTIARY};")
+
+    def set_auto_mode(self, auto: bool):
+        """切换自动/手动模式（由设置页驱动）。"""
+        self._auto_mode = auto
+        if auto:
+            self.sn_input.setEnabled(False)
+            self.sn_input.setPlaceholderText("自动测试模式…")
+            self.start_btn.setEnabled(False)
+        else:
+            self.sn_input.setEnabled(True)
+            self.sn_input.setPlaceholderText("Scan Serial Number")
+            self.start_btn.setEnabled(True)
+
+    def set_dut_status(self, connected: bool):
+        """更新 DUT 连接状态圆点。"""
+        if connected:
+            self.dut_dot.setStyleSheet(f"color: {Colors.SUCCESS}; font-size: 14px;")
+            self.dut_label.setStyleSheet(f"color: {Colors.SUCCESS}; font-weight: 600;")
+            start_pulse(self.dut_dot, min_opacity=0.5, duration=800)
+        else:
+            stop_pulse(self.dut_dot)
+            self.dut_dot.setStyleSheet(f"color: {Colors.TEXT_TERTIARY}; font-size: 12px;")
+            self.dut_label.setStyleSheet(f"color: {Colors.TEXT_TERTIARY};")
+
+    def is_auto_mode(self) -> bool:
+        return self._auto_mode
 
     def _tick(self):
         self._elapsed += 0.1
@@ -192,8 +230,8 @@ class ControlBar(QWidget):
         self._timer.stop()
 
     def set_running(self, running: bool):
-        self.sn_input.setEnabled(not running)
-        self.start_btn.setEnabled(not running)
+        self.sn_input.setEnabled(not running and not self._auto_mode)
+        self.start_btn.setEnabled(not running and not self._auto_mode)
         if running:
             self.start_btn.setText("Running…")
             start_pulse(self.time_display, min_opacity=0.5, duration=1000)

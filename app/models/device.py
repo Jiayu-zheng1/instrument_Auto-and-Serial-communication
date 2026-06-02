@@ -12,8 +12,41 @@ def get_ports():
     ports = list(
         list_ports.grep(r"/dev/cu\.(usbmodem\w+|pencil\w*|Pencil\w*|Configuration\w*)")
     )
-    logger.info(f"get_ports:{ports[0].device}")
+    if ports:
+        logger.info(f"get_ports:{ports[0].device}")
     return ports
+
+
+def find_port_by_location(location_id: str):
+    """按 location ID 查找 DUT 串口。同时兼容两种 location 格式：
+    - pyserial: '20-6.3.2'（直接从 comports 来）
+    - system_profiler: '0x14633000'（去掉 0x 前缀匹配）
+
+    location_id 为空时直接用 get_ports() 兜底。
+    """
+    if location_id:
+        # 去掉 0x 前缀方便匹配
+        loc_id = location_id.lower().replace("0x", "")
+        for p in list_ports.comports():
+            d = p.device or ""
+            if "cu." not in d or "BLTH" in d or "Bluetooth" in d:
+                continue
+            # pyserial location
+            p_loc = (getattr(p, "location", "") or "").lower()
+            # system_profiler location: 从 device 名提取
+            # 如 cu.usbmodem1463201 → 14632 可匹配 0x14633000
+            import re
+            m = re.search(r"usbmodem(\d+)", d)
+            dev_loc = m.group(1) if m else ""
+
+            if loc_id in p_loc or loc_id in dev_loc or p_loc in loc_id:
+                logger.info(f"DUT location 匹配: {d} (pyserial_loc={p_loc})")
+                return d
+        # location_id 没匹配到，不继续兜底——可能 DUT 没插
+        return None
+    # 未设 location_id，用 get_ports 兜底
+    ports = get_ports()
+    return ports[0].device if ports else None
 
 
 class Device:
