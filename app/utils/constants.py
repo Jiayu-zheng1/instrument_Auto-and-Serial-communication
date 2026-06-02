@@ -1,4 +1,5 @@
 """Application-wide constants."""
+
 import os
 
 APP_NAME = "Read Data"

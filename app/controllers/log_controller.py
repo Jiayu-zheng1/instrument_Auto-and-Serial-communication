@@ -1,67 +1,62 @@
-"""Log controller — loguru initialization and Qt signal bridging."""
-import sys
-import os
-import datetime
-import shutil
-from PyQt5.QtCore import QObject, pyqtSignal
-from loguru import logger
+"""日志控制器 — 桥接 loguru 到 Qt UI + 兼容旧接口。
 
+> 模块化日志由 app/utils/logger.py 统一管理。
+> LogController 只负责 Qt 信号桥接和 TestRunner 兼容接口。
+"""
+
+import sys
+from pathlib import Path
+from PyQt5.QtCore import QObject, pyqtSignal
+from loguru import logger as _raw_logger  # raw loguru 实例，用于 add handler
+from app.utils.logger import get_logger, ensure_module
+
+logger = get_logger("LogController")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Qt 信号桥接器
+# ═══════════════════════════════════════════════════════════════════════════
 
 class LogHandler(QObject):
-    _Test_log_signal = pyqtSignal(str)
+    _signal = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
 
     def write(self, message):
-        self._Test_log_signal.emit(message.strip())
+        self._signal.emit(message.strip())
 
     def flush(self):
         pass
 
 
-class LogController:
-    """Manages loguru configuration and signal-based log output."""
+# ═══════════════════════════════════════════════════════════════════════════
+#  控制器
+# ═══════════════════════════════════════════════════════════════════════════
 
-    FORMAT = '{time:YYYY-MM-DD HH:mm:ss.SS} | {level:<5} | {message}'
+class LogController:
+    """Qt 信号桥接 + 兼容旧接口。"""
+
+    UI_FMT = "{time:YYYY-MM-DD HH:mm:ss.SS} | {level:<5} | {extra[module]} | {message}"
 
     def __init__(self, log_path: str):
-        self.log_file_id = None
-        self.log_path = log_path
-        self.logname = None
-        self.log_file_path = None
-        self.logger_initialized = False
+        self.log_path = Path(log_path)
+        self._handler: LogHandler | None = None
 
     def initialize(self):
-        os.makedirs(self.log_path, exist_ok=True)
-        if not self.logger_initialized:
-            logger.remove()
-            # 控制台只显示 INFO 及以上级别
-            logger.add(sys.stdout, format=self.FORMAT, level="INFO")
-            self._path_logger()
-            self.logger_initialized = True
-
-    def rename_log(self, sn: str = ''):
-        if hasattr(self, 'log_file_path') and self.log_file_path:
-            rename = os.path.join(
-                self.log_path,
-                f"{sn}{os.path.basename(self.log_file_path)}"
-            )
-            shutil.move(self.log_file_path, rename)
+        """初始化由 app/utils/logger 统一处理，此处只确保 LogController 模块存在。"""
+        ensure_module("LogController")
 
     def _path_logger(self):
-        if hasattr(self, 'log_file_id') and self.log_file_id:
-            logger.remove(self.log_file_id)
-        self.logname = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.log_file_path = os.path.join(self.log_path, f'_{self.logname}.log')
-        # 日志文件记录 DEBUG 及以上级别（包含原始返回值和 ASCII 值）
-        self.log_file_id = logger.add(
-            self.log_file_path, rotation="1 day", encoding="utf-8", retention="90 days",
-            level="DEBUG"
-        )
+        """兼容旧接口。"""
+        pass
+
+    def rename_log(self, sn: str = ""):
+        """兼容旧接口 — 不再按测试轮转日志。"""
+        pass
 
     def bind_signal(self, log_slot):
-        """Connect logger output to a Qt slot (e.g. append to QTextEdit)."""
-        self.log_handler = LogHandler()
-        self.log_handler._Test_log_signal.connect(log_slot)
-        logger.add(self.log_handler, format=self.FORMAT)
+        """将 loguru 输出桥接到 Qt slot（UI LogPanel）。"""
+        self._handler = LogHandler()
+        self._handler._signal.connect(log_slot)
+        _raw_logger.add(self._handler, format=self.UI_FMT, level="INFO")

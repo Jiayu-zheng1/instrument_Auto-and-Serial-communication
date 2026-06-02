@@ -6,6 +6,7 @@ from app.views.theme import (
     Colors, FONT_FAMILY, FONT_CAPTION_1, FONT_LARGE_TITLE,
     MARGIN, SECTION_GAP, STATUS_CARD_RADIUS
 )
+from app.views.animations import start_pulse, stop_pulse
 
 
 class StatusHeader(QWidget):
@@ -105,20 +106,24 @@ class StatusHeader(QWidget):
         self.status_card.setStyleSheet(f"""
             QFrame {{ background-color: {Colors.RUNNING}; border-radius: {STATUS_CARD_RADIUS}px; }}
         """)
+        start_pulse(self.status_card, min_opacity=0.65)
 
     def set_pass(self):
+        stop_pulse(self.status_card)
         self.status_label.setText("PASS")
         self.status_card.setStyleSheet(f"""
             QFrame {{ background-color: {Colors.SUCCESS}; border-radius: {STATUS_CARD_RADIUS}px; }}
         """)
 
     def set_fail(self):
+        stop_pulse(self.status_card)
         self.status_label.setText("FAIL")
         self.status_card.setStyleSheet(f"""
             QFrame {{ background-color: {Colors.DANGER}; border-radius: {STATUS_CARD_RADIUS}px; }}
         """)
 
     def set_ready(self):
+        stop_pulse(self.status_card)
         self.status_label.setText("Ready")
         self.status_card.setStyleSheet(f"""
             QFrame {{ background-color: {Colors.WARNING}; border-radius: {STATUS_CARD_RADIUS}px; }}

@@ -3,7 +3,9 @@
 import time
 import serial
 from serial.tools import list_ports
-from loguru import logger
+from app.utils.logger import get_logger
+
+logger = get_logger("DUT")
 
 
 def get_ports():

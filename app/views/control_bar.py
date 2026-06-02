@@ -10,6 +10,7 @@ from app.views.theme import (
     BUTTON_HEIGHT, INPUT_HEIGHT, ELEMENT_GAP, MARGIN, BORDER_RADIUS
 )
 from app.utils.constants import SN_MAX_LENGTH
+from app.views.animations import start_pulse, stop_pulse
 
 STATUS_LABELS = {"34970A": "34970A", "IT6382": "IT6382", "Relayboard": "Relay"}
 
@@ -195,8 +196,10 @@ class ControlBar(QWidget):
         self.start_btn.setEnabled(not running)
         if running:
             self.start_btn.setText("Running…")
+            start_pulse(self.time_display, min_opacity=0.5, duration=1000)
         else:
             self.start_btn.setText("Start")
+            stop_pulse(self.time_display)
 
     def _font(self, family: str, size: int, weight: str):
         f = QFont(family.split(",")[0].strip('"'), size)

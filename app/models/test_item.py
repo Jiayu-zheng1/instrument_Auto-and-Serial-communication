@@ -3,9 +3,10 @@
 import re
 import time
 import subprocess as sub
-from loguru import logger
+from app.utils.logger import get_logger
+
+logger = get_logger("DUT")
 from app.models.device import Device, get_ports
-from app.controllers.instrument_manager import InstrumentManager
 
 verRex = re.compile(r"Application\s\W\d\d\W\S\s(\w*)")
 uvpRex = re.compile(r"Reset Count:\s(\d+)")
@@ -24,11 +25,12 @@ lockVerRex = re.compile(r"0000\W:(\S\S)")
 class TestItem:
     """Encapsulates all DUT test procedures."""
 
-    def __init__(self):
+    def __init__(self, instrument_manager=None):
         self.FGSN = None
         self.dut = None
         self.ScanSN = None
-        self._scan_cache: dict[str, dict[str, float]] = {}  # 'resistance' | 'voltage'
+        self._scan_cache: dict[str, dict[str, float]] = {}
+        self._mgr = instrument_manager  # 由调用方注入
 
     def connent_dut(self, timeout=5):
         start_time = time.time()
@@ -47,6 +49,21 @@ class TestItem:
         logger.info("连接超时")
         return False
 
+    def close_dut(self):
+        if self.dut is not None:
+            self.dut.close_port()
+            logger.info("DUT has been shut down ")
+            self.dut = None
+
+    def Info_CheckDUT(self):
+        if self.dut is None:
+            self.connent_dut()
+            if self.dut:
+                return True
+            else:
+                logger.info("DUT connection Fail")
+                return False
+
     def run_read_cmd(self, method_name, config):
         """按 config 执行测试，method_name 为 TestName（匹配 TestItem 方法）。
         返回 (raw_hex, ascii_str, result) 元组。
@@ -58,12 +75,16 @@ class TestItem:
         if action == "connect":
             return "", "", "PASSED" if self.connent_dut() else "FAILED"
 
+        # DUT 未连接时直接返回空值，不 crash
+        if self.dut is None:
+            logger.info(f"{method_name}: DUT 未连接，返回 None")
+            return "", "", None
+
         for cmd in self._as_list(config.get("pre_cmds")):
             self.dut.send_cmd(cmd)
 
         hex_cmd = config.get("hex_cmd")
         if hex_cmd:
-            # 在发送命令前等待 delay（如果有）
             delay = float(config.get("delay", 0.05))
             raw_hex, data = self.dut.send_hex_cmd(hex_cmd, delay=delay)
             logger.info(f"{method_name} raw response: {data}")
@@ -281,12 +302,8 @@ class TestItem:
             return False
 
     # ═══════════════════════════════════════════════════════════════════════
-    #  仪器访问层 — 通过 InstrumentManager 单例获取 dmm / ps / relay
+    #  仪器访问层 — _mgr 由构造函数注入
     # ═══════════════════════════════════════════════════════════════════════
-
-    @property
-    def _mgr(self):
-        return InstrumentManager.instance()
 
     @property
     def _dmm(self):

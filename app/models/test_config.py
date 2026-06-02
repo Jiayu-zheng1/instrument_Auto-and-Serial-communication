@@ -1,7 +1,9 @@
 """Test configuration model — CSV row parsing and validation."""
 import json
 import ast
-from loguru import logger
+from app.utils.logger import get_logger
+
+logger = get_logger("Config")
 
 
 class TestConfig:
@@ -80,9 +82,13 @@ def load_test_configs(csv_rows: list[dict]) -> list[TestConfig]:
     return configs
 
 
-def _parse_config_text(config_text: str) -> dict:
+def _parse_config_text(config_text) -> dict:
     if not config_text:
         return {}
+
+    # 已经由 limits_loader 解析好的 dict，直接返回
+    if isinstance(config_text, dict):
+        return config_text
 
     # 尝试 JSON 解析
     try:

@@ -9,12 +9,14 @@ from PyQt5.QtWidgets import QApplication
 
 # ── 系统外观检测 ──────────────────────────────────────────────────────
 
+
 def _is_dark_mode() -> bool:
     """检测 macOS 系统是否为 Dark Mode。"""
     try:
         result = subprocess.run(
             ["defaults", "read", "-g", "AppleInterfaceStyle"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         return result.returncode == 0 and "Dark" in result.stdout
     except Exception:
@@ -26,13 +28,20 @@ def _accent_color() -> str:
     try:
         result = subprocess.run(
             ["defaults", "read", "-g", "AppleAccentColor"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         if result.returncode == 0:
             idx = result.stdout.strip()
-            accent_map = {"0": "#FF3B30", "1": "#FF9500", "2": "#FFCC00",
-                          "3": "#34C759", "4": "#007AFF", "5": "#AF52DE",
-                          "6": "#FF6482"}
+            accent_map = {
+                "0": "#FF3B30",
+                "1": "#FF9500",
+                "2": "#FFCC00",
+                "3": "#34C759",
+                "4": "#007AFF",
+                "5": "#AF52DE",
+                "6": "#FF6482",
+            }
             return accent_map.get(idx, "#007AFF")
     except Exception:
         pass
@@ -41,67 +50,68 @@ def _accent_color() -> str:
 
 # ── HIG Color Palette ──────────────────────────────────────────────────
 
+
 class _LightColors:
-    WINDOW_BG        = "#F5F5F7"
-    CONTROL_BG       = "#FFFFFF"
-    GROUP_BG         = "#FFFFFF"
-    SIDEBAR_BG       = "#ECECF0"
-    SUCCESS           = "#34C759"
-    SUCCESS_BG        = "#D4F5DD"
-    DANGER            = "#FF3B30"
-    DANGER_BG         = "#FFD6D4"
-    WARNING           = "#FF9500"
-    WARNING_BG        = "#FFE8C0"
-    RUNNING           = "#149392"
-    RUNNING_BG        = "#C8EDEC"
-    TEXT_PRIMARY      = "#1D1D1F"
-    TEXT_SECONDARY    = "#86868B"
-    TEXT_TERTIARY     = "#AEAEB2"
-    TEXT_PLACEHOLDER  = "#C7C7CC"
-    SEPARATOR         = "#D1D1D6"
-    BORDER            = "#C7C7CC"
-    LOG_BG            = "#FFFFFF"
-    LOG_TEXT          = "#1D1D1F"
-    LOG_TIMESTAMP     = "#007AFF"
-    LOG_LEVEL_INFO    = "#34C759"
-    LOG_LEVEL_DEBUG   = "#AF52DE"
+    WINDOW_BG = "#F5F5F7"
+    CONTROL_BG = "#FFFFFF"
+    GROUP_BG = "#FFFFFF"
+    SIDEBAR_BG = "#ECECF0"
+    SUCCESS = "#34C759"
+    SUCCESS_BG = "#D4F5DD"
+    DANGER = "#FF3B30"
+    DANGER_BG = "#FFD6D4"
+    WARNING = "#FF9500"
+    WARNING_BG = "#FFE8C0"
+    RUNNING = "#149392"
+    RUNNING_BG = "#C8EDEC"
+    TEXT_PRIMARY = "#1D1D1F"
+    TEXT_SECONDARY = "#86868B"
+    TEXT_TERTIARY = "#AEAEB2"
+    TEXT_PLACEHOLDER = "#C7C7CC"
+    SEPARATOR = "#D1D1D6"
+    BORDER = "#C7C7CC"
+    LOG_BG = "#FFFFFF"
+    LOG_TEXT = "#1D1D1F"
+    LOG_TIMESTAMP = "#007AFF"
+    LOG_LEVEL_INFO = "#34C759"
+    LOG_LEVEL_DEBUG = "#AF52DE"
     LOG_LEVEL_WARNING = "#FF9500"
-    LOG_LEVEL_ERROR   = "#FF3B30"
+    LOG_LEVEL_ERROR = "#FF3B30"
 
 
 class _DarkColors:
-    WINDOW_BG        = "#1E1E20"
-    CONTROL_BG       = "#2C2C2E"
-    GROUP_BG         = "#2C2C2E"
-    SIDEBAR_BG       = "#252527"
-    SUCCESS           = "#30D158"
-    SUCCESS_BG        = "#1A3A2A"
-    DANGER            = "#FF453A"
-    DANGER_BG         = "#3A1A1A"
-    WARNING           = "#FF9F0A"
-    WARNING_BG        = "#3A2A0A"
-    RUNNING           = "#5EE6D0"
-    RUNNING_BG        = "#0A2A2A"
-    TEXT_PRIMARY      = "#F5F5F7"
-    TEXT_SECONDARY    = "#98989D"
-    TEXT_TERTIARY     = "#636366"
-    TEXT_PLACEHOLDER  = "#636366"
-    SEPARATOR         = "#3A3A3C"
-    BORDER            = "#48484A"
-    LOG_BG            = "#2C2C2E"
-    LOG_TEXT          = "#F5F5F7"
-    LOG_TIMESTAMP     = "#64D2FF"
-    LOG_LEVEL_INFO    = "#30D158"
-    LOG_LEVEL_DEBUG   = "#BF5AF2"
+    WINDOW_BG = "#1E1E20"
+    CONTROL_BG = "#2C2C2E"
+    GROUP_BG = "#2C2C2E"
+    SIDEBAR_BG = "#252527"
+    SUCCESS = "#30D158"
+    SUCCESS_BG = "#1A3A2A"
+    DANGER = "#FF453A"
+    DANGER_BG = "#3A1A1A"
+    WARNING = "#FF9F0A"
+    WARNING_BG = "#3A2A0A"
+    RUNNING = "#5EE6D0"
+    RUNNING_BG = "#0A2A2A"
+    TEXT_PRIMARY = "#F5F5F7"
+    TEXT_SECONDARY = "#98989D"
+    TEXT_TERTIARY = "#636366"
+    TEXT_PLACEHOLDER = "#636366"
+    SEPARATOR = "#3A3A3C"
+    BORDER = "#48484A"
+    LOG_BG = "#2C2C2E"
+    LOG_TEXT = "#F5F5F7"
+    LOG_TIMESTAMP = "#64D2FF"
+    LOG_LEVEL_INFO = "#30D158"
+    LOG_LEVEL_DEBUG = "#BF5AF2"
     LOG_LEVEL_WARNING = "#FF9F0A"
-    LOG_LEVEL_ERROR   = "#FF453A"
+    LOG_LEVEL_ERROR = "#FF453A"
 
 
 def _resolve():
     # 锁定浅色主题，不随系统 Dark Mode 变化
     base = _LightColors
-    base.PRIMARY        = "#007AFF"
-    base.PRIMARY_HOVER  = _darken(base.PRIMARY, 0.15)
+    base.PRIMARY = "#007AFF"
+    base.PRIMARY_HOVER = _darken(base.PRIMARY, 0.15)
     return base
 
 
@@ -120,34 +130,35 @@ Colors = _resolve()
 # ── HIG Typography ──────────────────────────────────────────────────────
 # SF Pro / SF Mono — macOS system font stack
 
-FONT_FAMILY         = '"Helvetica Neue", sans-serif'
-FONT_MONO           = '"Menlo", "SF Mono", "Monaco", monospace'
+FONT_FAMILY = '"Helvetica Neue", sans-serif'
+FONT_MONO = '"Menlo", "SF Mono", "Monaco", monospace'
 
-FONT_LARGE_TITLE    = (FONT_FAMILY, 24, "Semibold")
-FONT_TITLE_2        = (FONT_FAMILY, 20, "Semibold")
-FONT_TITLE_3        = (FONT_FAMILY, 18, "Semibold")
-FONT_BODY           = (FONT_FAMILY, 13, "Regular")
-FONT_CALLOUT        = (FONT_FAMILY, 13, "Regular")
-FONT_CAPTION_1      = (FONT_FAMILY, 12, "Regular")
-FONT_CAPTION_2      = (FONT_FAMILY, 11, "Regular")
-FONT_MONOSPACE      = (FONT_MONO, 12, "Regular")
+FONT_LARGE_TITLE = (FONT_FAMILY, 24, "Semibold")
+FONT_TITLE_2 = (FONT_FAMILY, 20, "Semibold")
+FONT_TITLE_3 = (FONT_FAMILY, 18, "Semibold")
+FONT_BODY = (FONT_FAMILY, 13, "Regular")
+FONT_CALLOUT = (FONT_FAMILY, 13, "Regular")
+FONT_CAPTION_1 = (FONT_FAMILY, 12, "Regular")
+FONT_CAPTION_2 = (FONT_FAMILY, 11, "Regular")
+FONT_MONOSPACE = (FONT_MONO, 12, "Regular")
 
 # ── HIG Metrics ─────────────────────────────────────────────────────────
-WINDOW_WIDTH        = 1024
-WINDOW_HEIGHT       = 768
-WINDOW_MIN_WIDTH    = 900
-WINDOW_MIN_HEIGHT   = 640
-MARGIN              = 20
-SECTION_GAP         = 16
-ELEMENT_GAP         = 8
-BUTTON_HEIGHT       = 28
-INPUT_HEIGHT        = 24
-BORDER_RADIUS       = 6
-TOOLBAR_HEIGHT      = 44
-STATUS_CARD_RADIUS  = 8
-TABLE_ROW_HEIGHT    = 32
+WINDOW_WIDTH = 1024
+WINDOW_HEIGHT = 768
+WINDOW_MIN_WIDTH = 900
+WINDOW_MIN_HEIGHT = 640
+MARGIN = 20
+SECTION_GAP = 16
+ELEMENT_GAP = 8
+BUTTON_HEIGHT = 28
+INPUT_HEIGHT = 24
+BORDER_RADIUS = 6
+TOOLBAR_HEIGHT = 44
+STATUS_CARD_RADIUS = 8
+TABLE_ROW_HEIGHT = 32
 
 # ── QSS Stylesheet — Global ─────────────────────────────────────────────
+
 
 def stylesheet() -> str:
     return f"""

@@ -5,7 +5,9 @@ import os
 import threading
 import time
 from PyQt5.QtCore import QObject, pyqtSignal
-from loguru import logger
+from app.utils.logger import get_logger
+
+logger = get_logger("InstrumentManager")
 
 from app.models.instruments.keysight_34970a import KEYSIGHT_34970A
 from app.models.instruments.ps_it6382 import IT6382

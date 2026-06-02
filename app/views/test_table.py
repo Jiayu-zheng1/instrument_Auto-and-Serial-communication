@@ -112,14 +112,14 @@ class TestTable(QTableWidget):
                 self.item(r, self.COL_ITEM)
                 and self.item(r, self.COL_ITEM).text() == test_item
             ):
-                item = self.item(r, self.COL_RESULT)
-                if item:
+                result_item = self.item(r, self.COL_RESULT)
+                if result_item:
                     if result == "Pass":
-                        item.setBackground(QBrush(QColor(Colors.SUCCESS_BG)))
-                        item.setForeground(QBrush(QColor(Colors.SUCCESS)))
+                        result_item.setBackground(QBrush(QColor(Colors.SUCCESS_BG)))
+                        result_item.setForeground(QBrush(QColor(Colors.SUCCESS)))
                     else:
-                        item.setBackground(QBrush(QColor(Colors.DANGER_BG)))
-                        item.setForeground(QBrush(QColor(Colors.DANGER)))
+                        result_item.setBackground(QBrush(QColor(Colors.DANGER_BG)))
+                        result_item.setForeground(QBrush(QColor(Colors.DANGER)))
                 break
 
     def _update_column(self, test_item: str, col: int, value: str):
