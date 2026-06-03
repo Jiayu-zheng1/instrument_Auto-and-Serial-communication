@@ -27,6 +27,7 @@ class TestTable(QTableWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._auto_scroll = True  # 默认启用，由外部同步实际配置
         self._setup()
 
     def _setup(self):
@@ -122,6 +123,10 @@ class TestTable(QTableWidget):
                         result_item.setForeground(QBrush(QColor(Colors.DANGER)))
                 break
 
+    def set_auto_scroll(self, enabled: bool):
+        """设置测试表格是否自动滚动到当前行。"""
+        self._auto_scroll = enabled
+
     def _update_column(self, test_item: str, col: int, value: str):
         for r in range(self.rowCount()):
             if (
@@ -129,10 +134,11 @@ class TestTable(QTableWidget):
                 and self.item(r, self.COL_ITEM).text() == test_item
             ):
                 self.setItem(r, col, self._cell(value))
-                # 自动滚动到当前行
-                item = self.item(r, self.COL_ITEM)
-                if item:
-                    self.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+                # 仅在启用自动滚动时跳转到当前行
+                if self._auto_scroll:
+                    item = self.item(r, self.COL_ITEM)
+                    if item:
+                        self.scrollToItem(item, QAbstractItemView.PositionAtCenter)
                 break
 
     def _cell(self, text: str) -> QTableWidgetItem:

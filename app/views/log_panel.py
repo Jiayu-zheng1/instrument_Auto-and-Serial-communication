@@ -24,6 +24,7 @@ class LogPanel(QWidget):
         layout.addWidget(header)
 
         # Log output — white background
+        self._auto_scroll = True  # 默认启用，由外部同步实际配置
         self.text_edit = QTextEdit()
         self.text_edit.setReadOnly(True)
         self.text_edit.setFont(QFont(FONT_MONO.split(",")[0].strip('"'), 11))
@@ -57,9 +58,14 @@ class LogPanel(QWidget):
         """)
         layout.addWidget(self.text_edit)
 
+    def set_auto_scroll(self, enabled: bool):
+        """设置是否自动滚动到底部。"""
+        self._auto_scroll = enabled
+
     def append_log(self, message: str):
         self.text_edit.append(message)
-        self.text_edit.moveCursor(QTextCursor.End)
+        if self._auto_scroll:
+            self.text_edit.moveCursor(QTextCursor.End)
 
     def clear_log(self):
         self.text_edit.clear()

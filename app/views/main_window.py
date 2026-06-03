@@ -1,4 +1,5 @@
 """HIG-compliant main window — 原生菜单栏 + 键盘快捷键 + 仪器副窗口。"""
+
 import csv
 import os
 from PyQt5.QtWidgets import (
@@ -232,7 +233,9 @@ class MainWindow(QMainWindow):
         self.log_panel.clear_log()
         self.control_bar.start_timer()
 
-        self._runner = TestRunner(self._csv_data, self._log_ctrl, instrument_manager=self._instr_mgr)
+        self._runner = TestRunner(
+            self._csv_data, self._log_ctrl, instrument_manager=self._instr_mgr
+        )
         self._runner.ScanSN = sn
         self._runner.signal_value.connect(self.test_table.set_value)
         self._runner.signal_result.connect(self.test_table.set_result)
@@ -243,23 +246,25 @@ class MainWindow(QMainWindow):
         self._runner.start()
 
     def _sync_auto_mode(self):
-        """关闭设置页后同步：更新 location_id、自动模式、控制栏状态。"""
+        """关闭设置页后同步：更新 location_id、自动模式、控制栏状态、日志滚动。"""
         cfg = load_config()
         auto = cfg.get("auto_test_mode", False)
         loc = cfg.get("dut_location_id", "")
 
         self.control_bar.set_auto_mode(auto)
         self._dut_monitor.set_location_id(loc)
+        self.log_panel.set_auto_scroll(cfg.get("auto_scroll_log", True))
+        self.test_table.set_auto_scroll(cfg.get("auto_scroll_log", True))
 
         if auto:
-            self.log_panel.append_log(f"🔍 自动测试模式 — location={loc}")
+            self.log_panel.append_log(f"自动测试模式 — location={loc}")
         else:
-            self.log_panel.append_log("✋ 手动测试模式")
+            self.log_panel.append_log("手动测试模式")
 
     def _on_dut_detected(self, device: str):
         """DUT 串口检测到 → 状态灯亮绿，自动模式才触发测试。"""
         self.control_bar.set_dut_status(True)
-        self.log_panel.append_log(f"🟢 DUT 已连接: {device}")
+        self.log_panel.append_log(f"DUT 已连接: {device}")
         cfg = load_config()
         if cfg.get("auto_test_mode", False):
             self._start_test()
@@ -267,7 +272,7 @@ class MainWindow(QMainWindow):
     def _on_dut_lost(self):
         """DUT 串口断开 → 状态灯灭。"""
         self.control_bar.set_dut_status(False)
-        self.log_panel.append_log("⚫ DUT 已断开")
+        self.log_panel.append_log("DUT 已断开")
 
     def _on_status(self, passed: bool):
         self.status_header.add_result(passed)

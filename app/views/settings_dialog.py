@@ -892,3 +892,20 @@ class SettingsDialog(QDialog):
         if self._sidebar_btns:
             first = list(self._sidebar_btns.keys())[0]
             self._sidebar_btns[first].set_active(True)
+        # 从 InstrumentManager 同步当前仪器状态（Dialog 懒创建，之前的信号已丢失）
+        self._sync_instrument_status()
+
+    def _sync_instrument_status(self):
+        """从 InstrumentManager 拉取当前连接状态更新 UI。"""
+        mgr = InstrumentManager.instance()
+        for device_id, row in self._rows.items():
+            if device_id == "34970A":
+                connected = mgr.dmm_connected
+            elif device_id == "IT6382":
+                connected = mgr.ps_connected
+            elif device_id == "Relayboard":
+                connected = mgr.relay_connected
+            else:
+                continue
+            detail = "已连接" if connected else "未连接"
+            row.set_status(connected, detail)
