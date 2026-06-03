@@ -1,4 +1,4 @@
-"""HIG-compliant main window — 原生菜单栏 + 键盘快捷键 + 仪器副窗口。"""
+"""HIG-compliant main window — 原生菜单栏 + 键盘快捷键 + 仪器副窗口 + 多通道支持。"""
 
 import csv
 import os
@@ -11,6 +11,8 @@ from PyQt5.QtWidgets import (
     QMenuBar,
     QMenu,
     QAction,
+    QStackedWidget,
+    QTabWidget,
 )
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont, QKeySequence
@@ -20,7 +22,10 @@ from app.views.status_header import StatusHeader
 from app.views.test_table import TestTable
 from app.views.log_panel import LogPanel
 from app.views.settings_dialog import SettingsDialog
+from app.views.channel_tab import ChannelTab
+from app.views.summary_tab import SummaryTab
 from app.controllers.test_runner import TestRunner
+from app.controllers.channel_runner import ChannelRunner
 from app.controllers.log_controller import LogController
 from app.controllers.instrument_manager import InstrumentManager
 from app.controllers.dut_monitor import DutMonitor
@@ -35,18 +40,21 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self._csv_data: list[dict] = []
-        self._runner: TestRunner = None
+        self._runner: TestRunner | None = None
+        self._runners: list[ChannelRunner] = []  # 多通道 runners
+        self._multi_testing_channels: set[str] = set()  # 正在测试的通道
         self._log_ctrl = LogController(LOG_DIR)
         self._testing = False
 
         self._instr_mgr = InstrumentManager.instance()
         self._instr_dialog: SettingsDialog | None = None
 
-        # 从配置读取 location_id
+        # 从配置读取
         cfg = load_config()
         loc = cfg.get("dut_location_id", "")
+        self._multi_mode = cfg.get("multi_channel_mode", False)
 
-        # DUT 监控线程 — 用 ioreg + location_id 检测串口
+        # DUT 监控线程 — 用 ioreg + location_id 检测串口（单通道模式用）
         self._dut_monitor = DutMonitor(location_id=loc)
         self._dut_monitor.dut_detected.connect(self._on_dut_detected)
         self._dut_monitor.dut_lost.connect(self._on_dut_lost)
@@ -64,8 +72,14 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._instr_mgr.start_auto_check()
 
-        # 启动监控线程
-        self._dut_monitor.start()
+        # 启动监控线程（单通道模式）
+        if not self._multi_mode:
+            self._dut_monitor.start()
+
+        # 多通道模式：初始化 tab 并切换到多通道视图
+        if self._multi_mode:
+            self._rebuild_multi_channel_tabs()
+            self._stacked.setCurrentIndex(1)
 
     # ── UI 构建 ──────────────────────────────────────────────────────────
 
@@ -83,6 +97,15 @@ class MainWindow(QMainWindow):
         self.status_header = StatusHeader()
         root.addWidget(self.status_header)
 
+        # ── QStackedWidget：单通道(索引0) / 多通道(索引1) ──
+        self._stacked = QStackedWidget()
+
+        # 页0: 单通道布局 (QSplitter)
+        single_page = QWidget()
+        single_layout = QVBoxLayout(single_page)
+        single_layout.setContentsMargins(0, 0, 0, 0)
+        single_layout.setSpacing(0)
+
         splitter = QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(1)
         splitter.setStyleSheet(
@@ -98,7 +121,20 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 2)
         splitter.setSizes([600, 400])
 
-        root.addWidget(splitter, 1)
+        single_layout.addWidget(splitter)
+        self._stacked.addWidget(single_page)
+
+        # 页1: 多通道布局 (QTabWidget) — 占位，运行时 rebuild
+        self._multi_page = QWidget()
+        self._multi_page_layout = QVBoxLayout(self._multi_page)
+        self._multi_page_layout.setContentsMargins(0, 0, 0, 0)
+        self._multi_page_layout.setSpacing(0)
+        self._tab_widget: QTabWidget | None = None
+        self._summary_tab: SummaryTab | None = None
+        self._channel_tabs: dict[str, ChannelTab] = {}
+        self._stacked.addWidget(self._multi_page)
+
+        root.addWidget(self._stacked, 1)
 
     # ── 原生菜单栏 (macOS HIG Rule 1.1) ────────────────────────────────
 
@@ -220,9 +256,13 @@ class MainWindow(QMainWindow):
 
     # ── 测试流程 ──────────────────────────────────────────────────────
 
-    def _start_test(self):
+    def _start_test(self, only_channel: str = ""):
         if self._testing:
             return
+        if self._multi_mode:
+            self._start_multi_test(only_channel=only_channel)
+            return
+
         sn = self.control_bar.sn_input.text().strip()
 
         self._testing = True
@@ -246,10 +286,23 @@ class MainWindow(QMainWindow):
         self._runner.start()
 
     def _sync_auto_mode(self):
-        """关闭设置页后同步：更新 location_id、自动模式、控制栏状态、日志滚动。"""
+        """关闭设置页后同步：更新多通道/单通道模式、location、控制栏等。"""
         cfg = load_config()
         auto = cfg.get("auto_test_mode", False)
         loc = cfg.get("dut_location_id", "")
+        new_multi = cfg.get("multi_channel_mode", False)
+
+        # 多通道模式变化 → 提示重启
+        if new_multi != self._multi_mode:
+            self._multi_mode = new_multi
+            if new_multi:
+                self._rebuild_multi_channel_tabs()
+                self._stacked.setCurrentIndex(1)
+                self._dut_monitor.pause()
+            else:
+                self._stacked.setCurrentIndex(0)
+                self._dut_monitor.set_location_id(loc)
+                self._dut_monitor.resume()
 
         self.control_bar.set_auto_mode(auto)
         self._dut_monitor.set_location_id(loc)
@@ -260,6 +313,11 @@ class MainWindow(QMainWindow):
             self.log_panel.append_log(f"自动测试模式 — location={loc}")
         else:
             self.log_panel.append_log("手动测试模式")
+
+        if self._multi_mode:
+            self.log_panel.append_log(
+                f"多通道模式: {cfg.get('channel_count', 4)} 通道"
+            )
 
     def _on_dut_detected(self, device: str):
         """DUT 串口检测到 → 状态灯亮绿，自动模式才触发测试。"""
@@ -292,7 +350,194 @@ class MainWindow(QMainWindow):
     def _on_display_sn(self, scan_sn: str, fgsn: str):
         self.statusBar().showMessage(f"ScanSN: {scan_sn}  |  FGSN: {fgsn}")
 
+    # ── 多通道测试 ──────────────────────────────────────────────────
+
+    def _rebuild_multi_channel_tabs(self):
+        """重建多通道 TabWidget（Summary + 各通道 Tab）。"""
+        cfg = load_config()
+        channel_count = cfg.get("channel_count", 4)
+        loc_ids = cfg.get("channel_location_ids", ["", "", "", ""])
+
+        # 清除旧 tab
+        if self._tab_widget:
+            self._multi_page_layout.removeWidget(self._tab_widget)
+            self._tab_widget.deleteLater()
+
+        self._tab_widget = QTabWidget()
+        self._tab_widget.setStyleSheet(f"""
+            QTabWidget::pane {{ border: none; }}
+            QTabBar::tab {{
+                padding: 8px 20px;
+                font-size: 13px;
+                font-weight: 600;
+                color: {Colors.TEXT_SECONDARY};
+                border: none;
+                border-bottom: 2px solid transparent;
+            }}
+            QTabBar::tab:selected {{
+                color: {Colors.PRIMARY};
+                border-bottom: 2px solid {Colors.PRIMARY};
+            }}
+        """)
+
+        # Summary Tab
+        self._summary_tab = SummaryTab(channel_count)
+        self._summary_tab.channel_selected.connect(self._on_summary_channel_selected)
+        self._tab_widget.addTab(self._summary_tab, "📊 Summary")
+
+        # 通道 Tabs
+        self._channel_tabs = {}
+        for i in range(channel_count):
+            ch = f"CH{i + 1}"
+            ct = ChannelTab(ch)
+            ct.load_config(self._csv_data)
+            ct.set_auto_scroll(cfg.get("auto_scroll_log", True))
+            ct.start_requested.connect(self._start_test)  # 每个通道独立 Start 也走统一入口
+            self._channel_tabs[ch] = ct
+            self._tab_widget.addTab(ct, ch)
+
+        self._multi_page_layout.addWidget(self._tab_widget)
+
+    def _start_multi_test(self, only_channel: str = ""):
+        """多通道并行测试。only_channel 为空=全通道启动，指定=只启动该通道。"""
+
+        if only_channel:
+            sn = ""
+            ct = self._channel_tabs.get(only_channel)
+            if ct:
+                sn = ct.sn_input.text().strip()
+                ct.set_running(True)
+            if self._summary_tab:
+                card = self._summary_tab.get_card(only_channel)
+                if card:
+                    card.set_running()
+            self.log_panel.append_log(f"🔵 {only_channel} 手动启动…")
+        else:
+            self.control_bar.set_running(True)
+            self.status_header.reset()
+            self.control_bar.start_timer()
+            if self._summary_tab:
+                self._summary_tab.reset_all()
+            for card in (self._summary_tab.cards.values() if self._summary_tab else []):
+                card.set_running()
+            self.status_header.set_running()
+            self.log_panel.append_log("🚀 全局 Start — 所有通道启动")
+
+        cfg = load_config()
+        channel_count = cfg.get("channel_count", 4)
+        loc_ids = cfg.get("channel_location_ids", ["", "", "", ""])
+        instr_bindings = cfg.get("channel_instruments", ["", "", "", ""])
+        fail_stop = cfg.get("fail_stop_test", True)
+
+        for i in range(channel_count):
+            ch = f"CH{i + 1}"
+
+            # only_channel 模式：只启动指定通道
+            if only_channel and ch != only_channel:
+                continue
+
+            # 该通道已在跑 → 跳过
+            if ch in self._multi_testing_channels:
+                continue
+
+            ct = self._channel_tabs.get(ch)
+            sn = ""
+            if ct:
+                ct.clear_results()
+                sn = ct.sn_input.text().strip()
+                ct.set_running(True)
+
+            loc_id = loc_ids[i] if i < len(loc_ids) else ""
+            instr = instr_bindings[i] if i < len(instr_bindings) else ""
+            mgr = self._instr_mgr if instr else None
+            runner = ChannelRunner(
+                channel_id=ch,
+                csv_rows=self._csv_data,
+                location_id=loc_id,
+                instrument_manager=mgr,
+                sn=sn,
+                fail_stop=fail_stop,
+            )
+            runner.signal_value.connect(self._on_channel_value)
+            runner.signal_result.connect(self._on_channel_result)
+            runner.signal_color.connect(self._on_channel_color)
+            runner.signal_channel_done.connect(self._on_channel_done)
+            runner.signal_log.connect(self._on_channel_log)
+            runner.signal_display.connect(self._on_channel_display)
+            self._runners.append(runner)
+            self._multi_testing_channels.add(ch)
+            runner.start()
+
+    def _on_channel_value(self, ch: str, display: str, value: str):
+        ct = self._channel_tabs.get(ch)
+        if ct:
+            ct.set_value(ch, display, value)
+
+    def _on_channel_result(self, ch: str, display: str, result: str):
+        ct = self._channel_tabs.get(ch)
+        if ct:
+            ct.set_result(ch, display, result)
+        # SummaryTab 卡片统计本通道 PASS/FAIL（多通道模式不污染全局计数器）
+        card = self._summary_tab.get_card(ch) if self._summary_tab else None
+        if card:
+            card.add_result(result == "Pass")
+
+    def _on_channel_color(self, ch: str, display: str, result: str):
+        ct = self._channel_tabs.get(ch)
+        if ct:
+            ct.set_result_color(ch, display, result)
+
+    def _on_channel_log(self, ch: str, msg: str):
+        ct = self._channel_tabs.get(ch)
+        if ct:
+            ct.append_log(msg)
+
+    def _on_channel_done(self, ch: str, overall_pass: bool):
+        self._multi_testing_channels.discard(ch)
+        card = self._summary_tab.get_card(ch) if self._summary_tab else None
+        if card:
+            card.set_finished(overall_pass)
+        ct = self._channel_tabs.get(ch)
+        if ct:
+            ct.set_done(overall_pass)
+        # 检查是否全部完成
+        if not self._multi_testing_channels:
+            self._on_all_channels_done()
+
+    def _on_channel_display(self, ch: str, scan_sn: str, fgsn: str):
+        self.statusBar().showMessage(f"[{ch}] ScanSN: {scan_sn}  |  FGSN: {fgsn}")
+
+    def _on_all_channels_done(self):
+        self.control_bar.stop_timer()
+        self.control_bar.set_running(False)
+        self._dut_monitor.resume()
+        # 汇总最终结果
+        if self._summary_tab:
+            any_fail = any(
+                not card._finished or not card._overall_pass
+                for card in self._summary_tab.cards.values()
+            )
+            if any_fail:
+                self.status_header.set_fail()
+            else:
+                self.status_header.set_pass()
+
+    def _on_summary_channel_selected(self, channel_id: str):
+        """Summary 页点击通道卡片 → 切换到对应 Tab。"""
+        if self._tab_widget and channel_id in self._channel_tabs:
+            for i in range(self._tab_widget.count()):
+                if self._tab_widget.tabText(i) == channel_id:
+                    self._tab_widget.setCurrentIndex(i)
+                    break
+
+    # ── 退出 ─────────────────────────────────────────────────────────
+
     def closeEvent(self, event):
-        self._dut_monitor.stop_monitor()  # 发停止信号，不阻塞
+        # 停止所有多通道 runner
+        for runner in self._runners:
+            if runner.isRunning():
+                runner.test_unit.close_dut()
+                runner.quit()
+        self._dut_monitor.stop_monitor()
         self._instr_mgr.shutdown()
         event.accept()

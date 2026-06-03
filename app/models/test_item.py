@@ -31,20 +31,34 @@ class TestItem:
         self.ScanSN = None
         self._scan_cache: dict[str, dict[str, float]] = {}
         self._mgr = instrument_manager  # 由调用方注入
+        self._dut_port: str | None = "__unset__"  # "__unset__"=自动探测, None=DUT不存在, str=指定串口
 
     def connent_dut(self, timeout=5):
+        # DUT 串口明确不存在（多通道模式下 location_id 搜不到）
+        if self._dut_port is None:
+            logger.info("DUT 串口不存在（多通道未检测到该通道 DUT），跳过连接")
+            return False
+
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
-                ports = get_ports()
+                if self._dut_port and self._dut_port != "__unset__":
+                    port_path = self._dut_port  # 指定端口
+                else:
+                    ports = get_ports()
+                    port_path = ports[0].device if ports else None
+
+                if not port_path:
+                    time.sleep(0.1)
+                    continue
                 dut = Device()
-                dut.open_get_port(port=ports[0].device, baudrate=921600)
+                dut.open_get_port(port=port_path, baudrate=921600)
                 if dut.ser and dut.ser.is_open:
-                    logger.info("====DUT connection is successful=====")
+                    logger.info(f"DUT 连接成功: {port_path}")
                     self.dut = dut
                     return True
             except Exception as e:
-                logger.info("open serial Fail")
+                logger.info(f"open serial Fail: {e}")
             time.sleep(0.1)
         logger.info("连接超时")
         return False

@@ -24,6 +24,11 @@ DEFAULTS = {
     "sfc_url": "",
     "sfc_online": False,
     "sfc_vip": "",
+    # 多通道测试
+    "multi_channel_mode": False,        # 是否启用多通道模式
+    "channel_count": 4,                 # 通道数量 (1-8)
+    "channel_location_ids": ["", "", "", ""],  # 每个通道的 DUT location ID
+    "channel_instruments": ["", "", "", ""],   # 每个通道绑定的仪器名，空=无仪器
 }
 
 

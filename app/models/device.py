@@ -8,6 +8,34 @@ from app.utils.logger import get_logger
 logger = get_logger("DUT")
 
 
+def list_dut_devices() -> list[dict]:
+    """列出所有可用的 DUT 串口设备及其 location 信息。
+    用于设置页显示可选设备列表，帮助用户配置每通道 Location ID。
+    """
+    import subprocess
+    import re as _re
+
+    result = []
+    try:
+        raw = subprocess.run(
+            ["ioreg", "-itrc", "IOSerialBSDClient", "-w0"],
+            capture_output=True, text=True, timeout=3,
+        ).stdout
+
+        for block in raw.split("+-o "):
+            sm = _re.search(r'"IOTTYSuffix"\s*=\s*"(\d+)"', block)
+            dm = _re.search(r'"IOCalloutDevice"\s*=\s*"(/dev/cu\.\S+)"', block)
+            if sm and dm and "BLTH" not in dm.group(1) and "Bluetooth" not in dm.group(1):
+                result.append({
+                    "device": dm.group(1),
+                    "suffix": sm.group(1),
+                    "location_id": f"0x{sm.group(1)}",
+                })
+    except Exception:
+        pass
+    return result
+
+
 def get_ports():
     ports = list(
         list_ports.grep(r"/dev/cu\.(usbmodem\w+|pencil\w*|Pencil\w*|Configuration\w*)")
@@ -18,35 +46,99 @@ def get_ports():
 
 
 def find_port_by_location(location_id: str):
-    """按 location ID 查找 DUT 串口。同时兼容两种 location 格式：
-    - pyserial: '20-6.3.2'（直接从 comports 来）
-    - system_profiler: '0x14633000'（去掉 0x 前缀匹配）
+    """按 location ID 查找 DUT 串口。
 
-    location_id 为空时直接用 get_ports() 兜底。
+    匹配优先级：
+    1. IOTTYSuffix 精准匹配（如 1463301 → usbmodem1463301）
+    2. IOTTYSuffix 前缀匹配（如 14633 → 1463301）
+    3. 公共前缀匹配（如 hub 0x14633000 → 1463301，取公共前缀 146330）
+    4. pyserial location / device 名匹配
+    5. 未设 location_id → get_ports() 兜底
     """
-    if location_id:
-        # 去掉 0x 前缀方便匹配
-        loc_id = location_id.lower().replace("0x", "")
-        for p in list_ports.comports():
-            d = p.device or ""
-            if "cu." not in d or "BLTH" in d or "Bluetooth" in d:
-                continue
-            # pyserial location
-            p_loc = (getattr(p, "location", "") or "").lower()
-            # system_profiler location: 从 device 名提取
-            # 如 cu.usbmodem1463201 → 14632 可匹配 0x14633000
-            import re
-            m = re.search(r"usbmodem(\d+)", d)
-            dev_loc = m.group(1) if m else ""
+    import subprocess
+    import re as _re
 
-            if loc_id in p_loc or loc_id in dev_loc or p_loc in loc_id:
-                logger.info(f"DUT location 匹配: {d} (pyserial_loc={p_loc})")
+    if not location_id:
+        ports = get_ports()
+        return ports[0].device if ports else None
+
+    loc_id = location_id.lower().replace("0x", "")
+
+    # ── ioreg 匹配（按优先级逐层扫描，避免第一命中误判）──
+    try:
+        raw = subprocess.run(
+            ["ioreg", "-itrc", "IOSerialBSDClient", "-w0"],
+            capture_output=True, text=True, timeout=3,
+        ).stdout
+
+        devices = []  # [(suffix, device)]
+        for block in raw.split("+-o "):
+            sm = _re.search(r'"IOTTYSuffix"\s*=\s*"(\d+)"', block)
+            dm = _re.search(r'"IOCalloutDevice"\s*=\s*"(/dev/cu\.\S+)"', block)
+            if sm and dm:
+                devices.append((sm.group(1), dm.group(1)))
+
+        # L1: 精准匹配
+        for suffix, device in devices:
+            if suffix == loc_id:
+                logger.info(f"DUT 精准匹配: {device} (IOTTYSuffix={suffix})")
+                return device
+
+        # L2: loc_id 是 suffix 的前缀
+        if len(loc_id) >= 3:
+            for suffix, device in devices:
+                if suffix.startswith(loc_id):
+                    logger.info(f"DUT 前缀匹配: {device} ({suffix} ← {loc_id})")
+                    return device
+
+        # L3: suffix 是 loc_id 的前缀（反向，如 1463301 是 14633001 的前缀）
+        for suffix, device in devices:
+            if loc_id.startswith(suffix) and len(suffix) >= 5:
+                logger.info(f"DUT 反向前缀匹配: {device} ({suffix} ⊂ {loc_id})")
+                return device
+
+        # L4: 公共前缀 ≥ 5 位，且必须唯一匹配
+        if len(loc_id) >= 5:
+            matched = []
+            for suffix, device in devices:
+                common = _common_prefix(suffix, loc_id)
+                if len(common) >= 5:
+                    matched.append((device, common))
+            if len(matched) == 1:
+                d, c = matched[0]
+                logger.info(f"DUT 公共前缀唯一匹配: {d} (common={c})")
                 return d
-        # location_id 没匹配到，不继续兜底——可能 DUT 没插
-        return None
-    # 未设 location_id，用 get_ports 兜底
-    ports = get_ports()
-    return ports[0].device if ports else None
+            elif len(matched) > 1:
+                logger.info(
+                    f"DUT 公共前缀匹配到 {len(matched)} 个设备 (loc={loc_id})，"
+                    f"请用更精确的 ID: {[s for s,_ in devices]}"
+                )
+    except Exception:
+        pass
+
+    # ── pyserial / device 名 fallback ──
+    for p in list_ports.comports():
+        d = p.device or ""
+        if "cu." not in d or "BLTH" in d or "Bluetooth" in d:
+            continue
+        p_loc = (getattr(p, "location", "") or "").lower()
+        m = _re.search(r"usbmodem(\d+)", d)
+        dev_loc = m.group(1) if m else ""
+
+        if loc_id in p_loc or loc_id in dev_loc or p_loc in loc_id or (dev_loc and loc_id in dev_loc):
+            logger.info(f"DUT fallback 匹配: {d}")
+            return d
+
+    return None
+
+
+def _common_prefix(a: str, b: str) -> str:
+    """返回两个字符串的最长公共前缀。"""
+    i = 0
+    for i, (ca, cb) in enumerate(zip(a, b)):
+        if ca != cb:
+            return a[:i]
+    return a[:i + 1]
 
 
 class Device:

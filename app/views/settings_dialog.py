@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import (
     QFileDialog,
     QPushButton,
     QButtonGroup,
+    QMessageBox,
 )
 from PyQt5.QtGui import QFont, QPixmap, QPainter, QColor, QBrush, QPen
 from qfluentwidgets import (
@@ -166,6 +167,149 @@ class _LineEditCard(_SettingCard):
     @property
     def edit(self):
         return self._edit
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  多通道配置卡片
+# ═══════════════════════════════════════════════════════════════════════════
+
+INSTRUMENT_OPTIONS = ["无仪器", "34970A", "IT6382", "Relayboard"]
+
+
+class _ChannelConfigCard(QFrame):
+    """单通道配置卡片：Location ID + 仪器绑定 + 状态。"""
+
+    # 通知其他通道：仪器已被选 (channel_index, instrument_name)
+    instrument_changed = pyqtSignal(int, str)
+
+    def __init__(self, index: int, parent=None):
+        super().__init__(parent)
+        self._index = index
+        self._build()
+
+    def _build(self):
+        self.setStyleSheet(f"""
+            _ChannelConfigCard {{
+                background-color: white;
+                border: 1px solid #E5E5EA;
+                border-radius: {BORDER_RADIUS}px;
+            }}
+            _ChannelConfigCard:hover {{ border-color: {Colors.PRIMARY}; }}
+        """)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(14, 10, 14, 10)
+        outer.setSpacing(8)
+
+        # ── 标题行：通道名 + 状态 ──
+        header = QHBoxLayout()
+        header.setSpacing(8)
+
+        self._name_lbl = QLabel(f"🔵 通道 {self._index + 1}")
+        self._name_lbl.setFont(_font(14, bold=True))
+        self._name_lbl.setStyleSheet(
+            f"color: {Colors.TEXT_PRIMARY}; background: transparent; border: none;"
+        )
+        header.addWidget(self._name_lbl)
+
+        header.addStretch()
+
+        self._status_dot = QLabel("⚫")
+        self._status_dot.setFont(_font(10))
+        self._status_dot.setToolTip("通道状态")
+        header.addWidget(self._status_dot)
+
+        self._status_text = QLabel("未配置")
+        self._status_text.setFont(_font(11))
+        self._status_text.setStyleSheet(
+            f"color: {Colors.TEXT_TERTIARY}; background: transparent; border: none;"
+        )
+        header.addWidget(self._status_text)
+
+        outer.addLayout(header)
+
+        # ── 内容行 ──
+        body = QHBoxLayout()
+        body.setSpacing(12)
+
+        # DUT Location ID
+        dut_label = QLabel("DUT")
+        dut_label.setFont(_font(12))
+        dut_label.setFixedWidth(32)
+        dut_label.setStyleSheet(
+            f"color: {Colors.TEXT_SECONDARY}; background: transparent; border: none;"
+        )
+        body.addWidget(dut_label)
+
+        self._loc_edit = LineEdit()
+        self._loc_edit.setPlaceholderText(f"Location ID (如 0x1420000{self._index})")
+        self._loc_edit.setClearButtonEnabled(True)
+        self._loc_edit.setMinimumWidth(180)
+        body.addWidget(self._loc_edit, 1)
+
+        # 仪器选择
+        instr_label = QLabel("仪器")
+        instr_label.setFont(_font(12))
+        instr_label.setFixedWidth(28)
+        instr_label.setStyleSheet(
+            f"color: {Colors.TEXT_SECONDARY}; background: transparent; border: none;"
+        )
+        body.addWidget(instr_label)
+
+        self._instr_combo = ComboBox()
+        self._instr_combo.addItems(INSTRUMENT_OPTIONS)
+        self._instr_combo.setCurrentIndex(0)
+        self._instr_combo.setMinimumWidth(140)
+        self._instr_combo.currentTextChanged.connect(self._on_instrument_changed)
+        body.addWidget(self._instr_combo)
+
+        outer.addLayout(body)
+
+    def _on_instrument_changed(self, text: str):
+        self.instrument_changed.emit(self._index, text)
+
+    # ── 属性 ──
+
+    @property
+    def loc_edit(self) -> LineEdit:
+        return self._loc_edit
+
+    @property
+    def instr_combo(self) -> ComboBox:
+        return self._instr_combo
+
+    @property
+    def index(self) -> int:
+        return self._index
+
+    def get_location_id(self) -> str:
+        return self._loc_edit.text().strip()
+
+    def set_location_id(self, val: str):
+        self._loc_edit.setText(val)
+
+    def get_instrument(self) -> str:
+        return self._instr_combo.currentText()
+
+    def set_instrument(self, val: str):
+        idx = self._instr_combo.findText(val)
+        if idx >= 0:
+            self._instr_combo.setCurrentIndex(idx)
+
+    def set_status(self, connected: bool):
+        if connected:
+            self._status_dot.setText("🟢")
+            self._status_text.setText("已连接")
+            self._status_text.setStyleSheet(
+                f"color: {Colors.SUCCESS}; font-weight: 600; background: transparent; border: none;"
+            )
+        else:
+            self._status_dot.setText("⚫")
+            self._status_text.setText("未连接")
+            self._status_text.setStyleSheet(
+                f"color: {Colors.TEXT_TERTIARY}; background: transparent; border: none;"
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -413,6 +557,7 @@ class SettingsDialog(QDialog):
         self._mgr = InstrumentManager.instance()
         self._rows: dict[str, _InstrumentRow] = {}
         self._system_config = load_config()
+        self._original_config = dict(self._system_config)
         self._section_anchors: dict[str, QLabel] = {}  # 段名 → header QLabel
         self._sidebar_btns: dict[str, _SidebarBtn] = {}
         self._scroll_locked = False
@@ -672,6 +817,58 @@ class SettingsDialog(QDialog):
         )
         self._add_card(self._auto_test_card)
 
+        # ── 多通道测试 ──
+        self._multi_channel_card = _SwitchCard(
+            FluentIcon.IOT,
+            "多通道测试模式",
+            "开启后同时测试多个 DUT，每个通道独立串口（需重启软件生效）",
+        )
+        self._multi_channel_card.switch.setChecked(
+            self._system_config.get("multi_channel_mode", False)
+        )
+        self._multi_channel_card.switch.checkedChanged.connect(self._on_multi_channel_toggled)
+        self._add_card(self._multi_channel_card)
+
+        # DUT 设备列表
+        self._dut_list_card = _PushSettingCard(
+            FluentIcon.INFO,
+            "可用 DUT 设备",
+            "点击查看当前连接的 DUT 设备及其 Location ID",
+        )
+        self._dut_list_card.clicked.connect(self._on_show_dut_list)
+        self._add_card(self._dut_list_card)
+
+        # 通道数量
+        self._channel_count_card = _ComboCard(
+            FluentIcon.MENU,
+            "通道数量",
+            "同时测试的 DUT 数量",
+        )
+        self._channel_count_card.combo.addItems([str(i) for i in range(1, 9)])
+        self._channel_count_card.combo.setCurrentText(
+            str(self._system_config.get("channel_count", 4))
+        )
+        self._channel_count_card.combo.currentTextChanged.connect(self._on_channel_count_changed)
+        self._add_card(self._channel_count_card)
+
+        # 每个通道的配置卡片（Location ID + 仪器选择）
+        self._channel_cards: list[_ChannelConfigCard] = []
+        channel_ids = self._system_config.get("channel_location_ids", ["", "", "", ""])
+        channel_instrs = self._system_config.get("channel_instruments", ["", "", "", ""])
+        for i in range(8):
+            card = _ChannelConfigCard(i)
+            if i < len(channel_ids):
+                card.set_location_id(channel_ids[i])
+            if i < len(channel_instrs) and channel_instrs[i]:
+                card.set_instrument(channel_instrs[i])
+            # 仪器互斥：同一仪器只能选一次
+            card.instrument_changed.connect(self._on_channel_instrument_changed)
+            self._add_card(card)
+            self._channel_cards.append(card)
+
+        # 初始同步可见性
+        self._sync_channel_loc_visibility()
+
         self._card_layout.addSpacing(20)
 
     def _build_general_cards(self):
@@ -751,12 +948,49 @@ class SettingsDialog(QDialog):
                 if idx >= 0:
                     row._port_combo.setCurrentIndex(idx)
 
+    def _on_show_dut_list(self):
+        """展示当前可用的 DUT 设备及其 Location ID。"""
+        from app.models.device import list_dut_devices
+        devs = list_dut_devices()
+        if devs:
+            lines = ["当前连接的 DUT 设备:\n"]
+            for i, d in enumerate(devs, 1):
+                lines.append(f"  CH{i}: Location ID = {d['location_id']}  ({d['device']})")
+            lines.append("\n将对应的 Location ID 填入下方通道配置中即可。")
+            QMessageBox.information(self, "可用 DUT 设备", "\n".join(lines))
+        else:
+            QMessageBox.information(self, "可用 DUT 设备", "未检测到 DUT 串口设备")
+
     def _on_select_log_path(self):
         current = self._log_path_card._content_lbl.text()
         folder = QFileDialog.getExistingDirectory(self, "选择日志保存路径", current)
         if folder:
             self._log_path_card.set_content(folder)
             self._system_config["log_path"] = folder
+
+    # ── 多通道回调 ─────────────────────────────────────────────────
+
+    def _on_multi_channel_toggled(self, checked: bool):
+        self._sync_channel_loc_visibility()
+
+    def _on_channel_count_changed(self, text: str):
+        self._sync_channel_loc_visibility()
+
+    def _on_channel_instrument_changed(self, channel_index: int, instrument: str):
+        """仪器互斥：同一仪器不能同时分配给多个通道。"""
+        if instrument == "无仪器":
+            return
+        # 把其他通道的同一仪器清除
+        for i, card in enumerate(self._channel_cards):
+            if i != channel_index and card.get_instrument() == instrument:
+                card.set_instrument("无仪器")
+
+    def _sync_channel_loc_visibility(self):
+        """根据 multi_channel_mode 和 channel_count 显示/隐藏通道配置卡片。"""
+        multi = self._multi_channel_card.switch.isChecked()
+        count = int(self._channel_count_card.combo.currentText()) if multi else 0
+        for i, card in enumerate(self._channel_cards):
+            card.setVisible(multi and i < count)
 
     # ── 配置加载/保存 ──────────────────────────────────────────────────
 
@@ -810,6 +1044,12 @@ class SettingsDialog(QDialog):
         self._baud_card.combo.setEnabled(enabled)
         self._location_id_card.edit.setEnabled(enabled)
         self._auto_test_card.switch.setEnabled(enabled)
+        # 多通道设置
+        self._multi_channel_card.switch.setEnabled(enabled)
+        self._channel_count_card.combo.setEnabled(enabled)
+        for card in self._channel_cards:
+            card.loc_edit.setEnabled(enabled)
+            card.instr_combo.setEnabled(enabled)
         # 通用设置
         self._fail_stop_card.switch.setEnabled(enabled)
         # 系统设置
@@ -836,6 +1076,7 @@ class SettingsDialog(QDialog):
     def _on_save(self):
         if not self._is_unlocked:
             return
+
         dmm_mode = self._dmm_row.get_mode()
         dmm_port = self._dmm_row.get_port_value()
         ps_mode = self._ps_row.get_mode()
@@ -864,6 +1105,12 @@ class SettingsDialog(QDialog):
         self._system_config["dut_baud_rate"] = int(self._baud_card.combo.currentText())
         self._system_config["dut_location_id"] = self._location_id_card.edit.text().strip()
         self._system_config["auto_test_mode"] = self._auto_test_card.switch.isChecked()
+        self._system_config["multi_channel_mode"] = self._multi_channel_card.switch.isChecked()
+        self._system_config["channel_count"] = int(self._channel_count_card.combo.currentText())
+        loc_ids = [c.get_location_id() for c in self._channel_cards[:8]]
+        instr_ids = [c.get_instrument() if c.get_instrument() != "无仪器" else "" for c in self._channel_cards[:8]]
+        self._system_config["channel_location_ids"] = loc_ids
+        self._system_config["channel_instruments"] = instr_ids
         self._system_config["fail_stop_test"] = self._fail_stop_card.switch.isChecked()
         self._system_config["auto_scroll_log"] = (
             self._auto_scroll_card.switch.isChecked()
@@ -873,7 +1120,21 @@ class SettingsDialog(QDialog):
         )
         save_config(self._system_config)
 
-        self.close()
+        # 对比原始配置，有变更才提示重启
+        if self._system_config != self._original_config:
+            import sys as _sys, os as _os
+
+            reply = QMessageBox.question(
+                self, "重启确认",
+                "设置已变更，重启软件后生效。",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes,
+            )
+            self.close()
+            if reply == QMessageBox.Yes:
+                python = _sys.executable
+                _os.execl(python, python, *_sys.argv)
+        else:
+            self.close()
 
     def set_device_status(self, device_name: str, connected: bool, detail: str):
         row = self._rows.get(device_name)
@@ -894,6 +1155,8 @@ class SettingsDialog(QDialog):
             self._sidebar_btns[first].set_active(True)
         # 从 InstrumentManager 同步当前仪器状态（Dialog 懒创建，之前的信号已丢失）
         self._sync_instrument_status()
+        # 快照当前配置，用于保存时对比是否有变更
+        self._original_config = dict(self._system_config)
 
     def _sync_instrument_status(self):
         """从 InstrumentManager 拉取当前连接状态更新 UI。"""
