@@ -28,15 +28,18 @@ class ChannelRunner(QThread):
 
     def __init__(self, channel_id: str, csv_rows: list[dict],
                  location_id: str = "",
-                 instrument_manager=None, sn: str = "", fail_stop: bool = True):
+                 instrument_manager=None, dmm_index: int = 0,
+                 sn: str = "", fail_stop: bool = True):
         super().__init__()
         self._channel_id = channel_id
         self._csv_rows = csv_rows
-        self._location_id = location_id  # USB location ID，空则自动取第一个串口
+        self._location_id = location_id
+        self._dmm_index = dmm_index          # 绑定的 DMM 实例索引
         self._sn = sn
         self._fail_stop = fail_stop
         self._test_status = True
         self.test_unit = TestItem(instrument_manager=instrument_manager)
+        self.test_unit._dmm_index = dmm_index
         self.configs: list[TestConfig] = []
         self.FGSN: str = ""
         self._log_lines: list[str] = []

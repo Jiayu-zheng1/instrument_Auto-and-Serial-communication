@@ -32,6 +32,7 @@ class TestItem:
         self._scan_cache: dict[str, dict[str, float]] = {}
         self._mgr = instrument_manager  # 由调用方注入
         self._dut_port: str | None = "__unset__"  # "__unset__"=自动探测, None=DUT不存在, str=指定串口
+        self._dmm_index: int = 0  # 绑定第几台 DMM（0=第一台）
 
     def connent_dut(self, timeout=5):
         # DUT 串口明确不存在（多通道模式下 location_id 搜不到）
@@ -321,7 +322,9 @@ class TestItem:
 
     @property
     def _dmm(self):
-        return self._mgr.dmm
+        if self._mgr is None:
+            return None
+        return self._mgr.get_dmm(self._dmm_index)
 
     @property
     def _ps(self):
