@@ -8,6 +8,9 @@ import threading
 
 thLock = threading.Lock()
 
+import logging
+logger = logging.getLogger("KEYSIGHT_34970A")
+
 # FTDI USB转GPIB适配器, 在系统中表现为串口
 USB_BAUDRATE = 9600
 
@@ -47,13 +50,13 @@ class KEYSIGHT_34970A:
                 for res in rm.list_resources():
                     if gpib_addr in res:
                         self.instrument = rm.open_resource(gpib_addr)
-                        print(f'34970A GPIB 连接成功: {gpib_addr}')
+                        logger.info(f'34970A GPIB 连接成功: {gpib_addr}')
                         return self.instrument
 
-                print('34970A 未找到仪器')
+                logger.warning('34970A 未找到仪器')
                 return None
             except Exception as e:
-                print(f"34970A init error: {e}")
+                logger.error(f"34970A init error: {e}")
                 return None
 
     # ── 连接子方法 ──────────────────────────────────────────────────────
@@ -71,9 +74,11 @@ class KEYSIGHT_34970A:
             self.instrument.write('*CLS')
             time.sleep(0.2)
             idn = self.instrument.query('*IDN?').strip()
-            print(f'34970A USB 连接成功: {port} -> {idn}')
+            logger.info(f'34970A USB 连接成功: {port} -> {idn}')
         except Exception as e:
-            print(f'34970A USB 连接失败 ({port}): {e}')
+            logger.error(f'34970A USB 连接失败 ({port}): {e}')
+            import traceback
+            logger.error(traceback.format_exc())
             self.instrument = None
 
     def _connect_gpib(self, resource_str: str):
@@ -83,9 +88,9 @@ class KEYSIGHT_34970A:
             self.instrument = rm.open_resource(resource_str)
             self.instrument.timeout = 5000
             idn = self.instrument.query('*IDN?').strip()
-            print(f'34970A GPIB 连接成功: {resource_str} -> {idn}')
+            logger.info(f'34970A GPIB 连接成功: {resource_str} -> {idn}')
         except Exception as e:
-            print(f'34970A GPIB 连接失败 ({resource_str}): {e}')
+            logger.error(f'34970A GPIB 连接失败 ({resource_str}): {e}')
             self.instrument = None
 
     def _connect_gpib_by_id(self, gpib_id: int):
@@ -98,12 +103,12 @@ class KEYSIGHT_34970A:
                     self.instrument = rm.open_resource(resource_str)
                     self.instrument.timeout = 5000
                     idn = self.instrument.query('*IDN?').strip()
-                    print(f'34970A GPIB 连接成功: {resource_str} -> {idn}')
+                    logger.info(f'34970A GPIB 连接成功: {resource_str} -> {idn}')
                     return
-            print(f'34970A GPIB 未找到资源: {resource_str}')
+            logger.warning(f'34970A GPIB 未找到资源: {resource_str}')
             self.instrument = None
         except Exception as e:
-            print(f'34970A GPIB 连接失败 ({resource_str}): {e}')
+            logger.error(f'34970A GPIB 连接失败 ({resource_str}): {e}')
             self.instrument = None
 
     def set_RES(self, channel):

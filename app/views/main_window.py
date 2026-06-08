@@ -34,20 +34,6 @@ from app.utils.limits_loader import load_limits_csv
 from app.utils.config import load_config
 
 
-def _parse_dmm_binding_index(instr: str) -> int:
-    """从仪器绑定字符串解析 DMM 实例索引。
-    '34970A' / '34970A #1' → 0, '34970A #2' → 1
-    """
-    if not instr or not instr.startswith("34970A"):
-        return 0
-    if "#" in instr:
-        try:
-            return int(instr.split("#")[1]) - 1
-        except (ValueError, IndexError):
-            pass
-    return 0
-
-
 class MainWindow(QMainWindow):
     """Primary application window with native macOS menu bar."""
 
@@ -263,9 +249,7 @@ class MainWindow(QMainWindow):
     def _on_all_instruments_checked(self):
         mgr = self._instr_mgr
         parts = []
-        for i in range(mgr.dmm_count):
-            name = f"34970A_{i + 1}" if mgr.dmm_count > 1 else "34970A"
-            parts.append(f"{name} ✓" if mgr.dmm_instance_connected(i) else f"{name} ✗")
+        parts.append("34970A ✓" if mgr.dmm_connected else "34970A ✗")
         parts.append("IT6382 ✓" if mgr.ps_connected else "IT6382 ✗")
         parts.append("Relayboard ✓" if mgr.relay_connected else "Relayboard ✗")
         self.log_panel.append_log(f"仪器检测完成: {' | '.join(parts)}")
@@ -465,15 +449,12 @@ class MainWindow(QMainWindow):
 
             loc_id = loc_ids[i] if i < len(loc_ids) else ""
             instr = instr_bindings[i] if i < len(instr_bindings) else ""
-            # 解析 DMM 索引：34970A→0, 34970A #1→0, 34970A #2→1
-            dmm_idx = _parse_dmm_binding_index(instr) if instr else 0
             mgr = self._instr_mgr if instr else None
             runner = ChannelRunner(
                 channel_id=ch,
                 csv_rows=self._csv_data,
                 location_id=loc_id,
                 instrument_manager=mgr,
-                dmm_index=dmm_idx,
                 sn=sn,
                 fail_stop=fail_stop,
             )

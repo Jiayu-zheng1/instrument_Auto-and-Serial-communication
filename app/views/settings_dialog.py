@@ -176,19 +176,6 @@ class _LineEditCard(_SettingCard):
 INSTRUMENT_OPTIONS = ["无仪器", "34970A", "IT6382", "Relayboard"]
 
 
-def _make_channel_instrument_options(dmm_count: int) -> list[str]:
-    """动态生成仪器下拉选项。单通道模式: 34970A。多通道: 34970A #1, 34970A #2..."""
-    opts = ["无仪器"]
-    if dmm_count <= 1:
-        opts.append("34970A")
-    else:
-        for i in range(1, dmm_count + 1):
-            opts.append(f"34970A #{i}")
-    opts.append("IT6382")
-    opts.append("Relayboard")
-    return opts
-
-
 class _ChannelConfigCard(QFrame):
     """单通道配置卡片：Location ID + 仪器绑定 + 状态。"""
 
@@ -271,34 +258,11 @@ class _ChannelConfigCard(QFrame):
         body.addWidget(instr_label)
 
         self._instr_combo = ComboBox()
+        self._instr_combo.addItems(INSTRUMENT_OPTIONS)
+        self._instr_combo.setCurrentIndex(0)
         self._instr_combo.setMinimumWidth(140)
         self._instr_combo.currentTextChanged.connect(self._on_instrument_changed)
         body.addWidget(self._instr_combo)
-
-    def set_instrument_options(self, dmm_count: int):
-        """动态更新仪器下拉选项（多通道时显示 34970A #1, #2...）。"""
-        current = self._instr_combo.currentText()
-        opts = _make_channel_instrument_options(dmm_count)
-        self._instr_combo.clear()
-        self._instr_combo.addItems(opts)
-        # 尝试恢复之前的选择
-        idx = self._instr_combo.findText(current)
-        if idx >= 0:
-            self._instr_combo.setCurrentIndex(idx)
-        else:
-            self._instr_combo.setCurrentIndex(0)
-
-    def get_instrument_index(self) -> int:
-        """返回绑定的 DMM 实例索引（0-based），非 DMM 返回 -1。"""
-        instr = self._instr_combo.currentText()
-        if instr.startswith("34970A"):
-            if "#" in instr:
-                try:
-                    return int(instr.split("#")[1]) - 1
-                except (ValueError, IndexError):
-                    pass
-            return 0  # "34970A" 无编号 → 第1台
-        return -1
 
         outer.addLayout(body)
 
@@ -329,10 +293,6 @@ class _ChannelConfigCard(QFrame):
         return self._instr_combo.currentText()
 
     def set_instrument(self, val: str):
-        """设置仪器绑定，兼容旧格式 '34970A' → '34970A #1'（多通道时）。"""
-        # 如果当前选项有编号版本，自动迁移
-        if val == "34970A" and self._instr_combo.findText("34970A #1") >= 0:
-            val = "34970A #1"
         idx = self._instr_combo.findText(val)
         if idx >= 0:
             self._instr_combo.setCurrentIndex(idx)
@@ -756,37 +716,15 @@ class SettingsDialog(QDialog):
         self._build_serial_cards()
         self._build_general_cards()
         self._build_system_cards()
-        # 通道卡片创建后，更新仪器选项
-        self._sync_channel_instrument_options()
 
     def _build_instrument_cards(self):
         self._add_section_header("仪器设置")
 
-        from app.utils.config import load_config as _lc
-        sys_cfg = _lc()
-        channel_count = sys_cfg.get("channel_count", 4)
-        multi = sys_cfg.get("multi_channel_mode", False)
-        dmm_instances = sys_cfg.get("dmm_instances", [{"mode": "usb", "port": "", "gpib": "11"}])
-
-        # DMM 实例数量（多通道模式=通道数，单通道=1）
-        max_dmm = channel_count if multi else 1
-        if len(dmm_instances) < max_dmm:
-            dmm_instances.extend(
-                [{"mode": "usb", "port": "", "gpib": "11"}] * (max_dmm - len(dmm_instances))
-            )
-        dmm_instances = dmm_instances[:max_dmm]
-        self._dmm_instance_count = max_dmm
-
-        self._dmm_rows: list[_InstrumentRow] = []
-        for i in range(max_dmm):
-            label = f"34970A #{i + 1}" if max_dmm > 1 else "34970A"
-            row = _InstrumentRow(f"34970A_{i + 1}" if max_dmm > 1 else "34970A",
-                                f"{label} 数字万用表", ["USB", "GPIB"])
-            row.signal_connect.connect(self.signal_reconnect.emit)
-            row.signal_disconnect.connect(self.signal_disconnect.emit)
-            self._add_card(row)
-            self._rows[row._device_id] = row
-            self._dmm_rows.append(row)
+        self._dmm_row = _InstrumentRow("34970A", "34970A 数字万用表", ["USB", "GPIB"])
+        self._dmm_row.signal_connect.connect(self.signal_reconnect.emit)
+        self._dmm_row.signal_disconnect.connect(self.signal_disconnect.emit)
+        self._add_card(self._dmm_row)
+        self._rows["34970A"] = self._dmm_row
 
         self._ps_row = _InstrumentRow("IT6382", "IT6382 程控电源", ["USB", "GPIB"])
         self._ps_row.signal_connect.connect(self.signal_reconnect.emit)
@@ -1039,21 +977,13 @@ class SettingsDialog(QDialog):
         self._sync_channel_loc_visibility()
 
     def _on_channel_instrument_changed(self, channel_index: int, instrument: str):
-        """仪器互斥：同一仪器实例不能同时分配给多个通道。
-        '34970A #1' 和 '34970A #2' 是不同实例，不冲突。
-        """
+        """仪器互斥：同一仪器不能同时分配给多个通道。"""
         if instrument == "无仪器":
             return
-        # IT6382 和 Relayboard 只有一台，需要互斥
-        if instrument in ("IT6382", "Relayboard"):
-            for i, card in enumerate(self._channel_cards):
-                if i != channel_index and card.get_instrument() == instrument:
-                    card.set_instrument("无仪器")
-        # 编号 DMM 实例（如 34970A #1）也不可重复
-        if instrument.startswith("34970A") and "#" in instrument:
-            for i, card in enumerate(self._channel_cards):
-                if i != channel_index and card.get_instrument() == instrument:
-                    card.set_instrument("无仪器")
+        # 把其他通道的同一仪器清除
+        for i, card in enumerate(self._channel_cards):
+            if i != channel_index and card.get_instrument() == instrument:
+                card.set_instrument("无仪器")
 
     def _sync_channel_loc_visibility(self):
         """根据 multi_channel_mode 和 channel_count 显示/隐藏通道配置卡片。"""
@@ -1062,36 +992,26 @@ class SettingsDialog(QDialog):
         for i, card in enumerate(self._channel_cards):
             card.setVisible(multi and i < count)
 
-    def _sync_channel_instrument_options(self):
-        """更新所有通道卡片的仪器下拉选项。"""
-        dmm_count = getattr(self, "_dmm_instance_count", 1)
-        for card in self._channel_cards:
-            card.set_instrument_options(dmm_count)
-
     # ── 配置加载/保存 ──────────────────────────────────────────────────
 
     def _load_instrument_config(self):
-        from app.utils.config import load_config as _lc
-        sys_cfg = _lc()
-        dmm_instances = sys_cfg.get("dmm_instances", [{"mode": "usb", "port": "", "gpib": "11"}])
+        cfg = self._mgr.config
 
-        for i, row in enumerate(self._dmm_rows):
-            inst_cfg = dmm_instances[i] if i < len(dmm_instances) else {"mode": "usb", "port": "", "gpib": "11"}
-            mode = inst_cfg.get("mode", "usb")
-            row.set_mode(mode)
-            if mode == "usb":
-                row.set_port_value(inst_cfg.get("port", ""))
-            else:
-                row.set_port_value(inst_cfg.get("gpib", "11"))
+        dmm_mode = cfg.get("dmm_mode", "usb")
+        self._dmm_row.set_mode(dmm_mode)
+        if dmm_mode == "usb":
+            self._dmm_row.set_port_value(cfg.get("dmm_port", ""))
+        else:
+            self._dmm_row.set_port_value(cfg.get("dmm_gpib", "11"))
 
-        ps_mode = self._mgr.config.get("ps_mode", "gpib")
+        ps_mode = cfg.get("ps_mode", "gpib")
         self._ps_row.set_mode(ps_mode)
         if ps_mode == "usb":
-            self._ps_row.set_port_value(self._mgr.config.get("ps_usb_port", ""))
+            self._ps_row.set_port_value(cfg.get("ps_usb_port", ""))
         else:
-            self._ps_row.set_port_value(self._mgr.config.get("ps_port", "8"))
+            self._ps_row.set_port_value(cfg.get("ps_port", "8"))
 
-        self._relay_row.set_port_value(self._mgr.config.get("relay_port", ""))
+        self._relay_row.set_port_value(cfg.get("relay_port", ""))
 
     # ── 密码解锁 ──────────────────────────────────────────────────────
 
@@ -1157,34 +1077,25 @@ class SettingsDialog(QDialog):
         if not self._is_unlocked:
             return
 
-        # ── 保存多 DMM 实例配置 ──
-        dmm_instances = []
-        for row in self._dmm_rows:
-            mode = row.get_mode()
-            port = row.get_port_value()
-            dmm_instances.append({
-                "mode": mode,
-                "port": port if mode == "usb" else "",
-                "gpib": port if mode == "gpib" else "11",
-            })
-        self._system_config["dmm_instances"] = dmm_instances
-
-        # 兼容旧 instrument_config（第一台 DMM 同步）
-        if dmm_instances:
-            first = dmm_instances[0]
-            dmm_mode_val = first["mode"]
-            self._mgr.update_config(
-                dmm_mode=dmm_mode_val,
-                dmm_port=first["port"] if dmm_mode_val == "usb" else "",
-                dmm_gpib=first["gpib"] if dmm_mode_val == "gpib" else "11",
-            )
-
+        dmm_mode = self._dmm_row.get_mode()
+        dmm_port = self._dmm_row.get_port_value()
         ps_mode = self._ps_row.get_mode()
         ps_port = self._ps_row.get_port_value()
         self._mgr.update_config(
+            dmm_mode=dmm_mode,
+            dmm_port=dmm_port
+            if dmm_mode == "usb"
+            else self._mgr.config.get("dmm_port", ""),
+            dmm_gpib=dmm_port
+            if dmm_mode == "gpib"
+            else self._mgr.config.get("dmm_gpib", "11"),
             ps_mode=ps_mode,
-            ps_usb_port=ps_port if ps_mode == "usb" else self._mgr.config.get("ps_usb_port", ""),
-            ps_port=ps_port if ps_mode == "gpib" else self._mgr.config.get("ps_port", "8"),
+            ps_usb_port=ps_port
+            if ps_mode == "usb"
+            else self._mgr.config.get("ps_usb_port", ""),
+            ps_port=ps_port
+            if ps_mode == "gpib"
+            else self._mgr.config.get("ps_port", "8"),
             relay_port=self._relay_row.get_port_value(),
         )
 
@@ -1251,9 +1162,8 @@ class SettingsDialog(QDialog):
         """从 InstrumentManager 拉取当前连接状态更新 UI。"""
         mgr = InstrumentManager.instance()
         for device_id, row in self._rows.items():
-            if device_id.startswith("34970A"):
-                idx = 0 if "_" not in device_id else int(device_id.split("_")[1]) - 1
-                connected = mgr.dmm_instance_connected(idx)
+            if device_id == "34970A":
+                connected = mgr.dmm_connected
             elif device_id == "IT6382":
                 connected = mgr.ps_connected
             elif device_id == "Relayboard":

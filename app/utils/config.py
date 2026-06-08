@@ -29,10 +29,6 @@ DEFAULTS = {
     "channel_count": 4,                 # 通道数量 (1-8)
     "channel_location_ids": ["", "", "", ""],  # 每个通道的 DUT location ID
     "channel_instruments": ["", "", "", ""],   # 每个通道绑定的仪器名，空=无仪器
-    # 多 DMM 实例端口（按通道数自动展开）
-    "dmm_instances": [                  # 每台 34970A 的独立配置
-        {"mode": "usb", "port": "/dev/cu.usbserial-FTDH1RD8", "gpib": "11"},
-    ],
 }
 
 

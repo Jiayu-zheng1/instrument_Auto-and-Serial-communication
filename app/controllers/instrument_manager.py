@@ -1,6 +1,4 @@
-"""仪器管理器 — 单例模式，管理 34970A / IT6382 / Relayboard 的连接和状态。
-支持多通道：每个通道可绑定独立的 DMM 实例（如 34970A_1, 34970A_2）。
-"""
+"""仪器管理器 — 单例模式，管理 34970A / IT6382 / Relayboard 的连接和状态。"""
 
 import json
 import os
@@ -15,28 +13,32 @@ from app.models.instruments.keysight_34970a import KEYSIGHT_34970A
 from app.models.instruments.ps_it6382 import IT6382
 from app.models.instruments.relay_board import RELAYBOARD
 from app.utils.constants import INSTRUMENT_CONFIG_PATH
-from app.utils.config import load_config
 
 
 # ── 默认配置 ──────────────────────────────────────────────────────────
 DEFAULT_CONFIG = {
-    "dmm_mode": "usb",
-    "dmm_port": "/dev/cu.usbserial-FTDH1RD8",
-    "dmm_gpib": "11",
-    "ps_mode": "gpib",
-    "ps_port": "8",
-    "ps_usb_port": "",
-    "relay_port": "/dev/cu.usbserial-AL02P374",
+    "dmm_mode": "usb",                     # "usb" | "gpib"
+    "dmm_port": "/dev/cu.usbserial-FTDH1RD8",  # 34970A USB 串口路径
+    "dmm_gpib": "11",                       # 34970A GPIB 地址
+    "ps_mode": "gpib",                      # "usb" | "gpib"
+    "ps_port": "8",                         # IT6382 GPIB 地址
+    "ps_usb_port": "",                      # IT6382 USB 串口路径
+    "relay_port": "/dev/cu.usbserial-AL02P374",  # Relayboard 串口路径
     "relay_version": "0",
 }
 
-DEVICE_CHECK_TIMEOUT = 3
+DEVICE_CHECK_TIMEOUT = 3  # 每台仪器检测超时 (秒)
 
 
 class InstrumentManager(QObject):
-    """仪器管理器单例。支持多台 34970A 一对一绑定通道。"""
+    """仪器管理器单例。
 
+    启动后台线程自动检测连接三台仪器，通过 Qt 信号通知 UI 状态变化。
+    """
+
+    # 单台仪器状态: (device_name, connected: bool, idn_or_error: str)
     signal_device_status = pyqtSignal(str, bool, str)
+    # 全部仪器检测完成
     signal_all_checked = pyqtSignal()
 
     _instance = None
@@ -55,13 +57,13 @@ class InstrumentManager(QObject):
         super().__init__(parent)
         InstrumentManager._instance = self
 
-        # 仪器实例 — DMM 支持多个
-        self._dmm_list: list[KEYSIGHT_34970A | None] = []
-        self._dmm_connected_list: list[bool] = []
+        # 仪器实例
+        self._dmm: KEYSIGHT_34970A | None = None
         self._ps: IT6382 | None = None
         self._relay: RELAYBOARD | None = None
 
         # 状态
+        self._dmm_connected = False
         self._ps_connected = False
         self._relay_connected = False
         self._checking = False
@@ -75,16 +77,20 @@ class InstrumentManager(QObject):
         return self._config
 
     def _load_config(self):
+        """从 JSON 文件加载仪器配置，合并到当前配置中。"""
         try:
             if os.path.exists(INSTRUMENT_CONFIG_PATH):
                 with open(INSTRUMENT_CONFIG_PATH, "r", encoding="utf-8") as f:
                     saved = json.load(f)
                 self._config.update(saved)
                 logger.info(f"仪器配置已从 {INSTRUMENT_CONFIG_PATH} 加载")
+            else:
+                logger.info("未找到仪器配置文件，使用默认配置")
         except Exception as e:
             logger.warning(f"加载仪器配置失败: {e}")
 
     def _save_config(self):
+        """保存当前仪器配置到 JSON 文件。"""
         try:
             os.makedirs(os.path.dirname(INSTRUMENT_CONFIG_PATH), exist_ok=True)
             with open(INSTRUMENT_CONFIG_PATH, "w", encoding="utf-8") as f:
@@ -94,47 +100,18 @@ class InstrumentManager(QObject):
             logger.warning(f"保存仪器配置失败: {e}")
 
     def update_config(self, **kwargs):
+        """更新仪器配置（端口、版本等）并自动持久化。"""
         for k, v in kwargs.items():
             if k in self._config:
                 self._config[k] = v
         self._save_config()
         logger.info(f"InstrumentManager config updated: {self._config}")
 
-    # ── DMM 实例列表 ──────────────────────────────────────────────────
-
-    def _get_dmm_instances(self) -> list[dict]:
-        """从 system_config.json 读取所有 DMM 实例配置。
-        兼容旧格式：如果没有 dmm_instances，用 instrument_config 的 dmm_* 构建单实例。
-        """
-        sys_cfg = load_config()
-        dmm_list = sys_cfg.get("dmm_instances", [])
-        if not dmm_list:
-            # 兼容旧格式
-            dmm_list = [{
-                "mode": self._config.get("dmm_mode", "usb"),
-                "port": self._config.get("dmm_port", "/dev/cu.usbserial-FTDH1RD8"),
-                "gpib": self._config.get("dmm_gpib", "11"),
-            }]
-        return dmm_list
-
-    @property
-    def dmm_count(self) -> int:
-        return len(self._get_dmm_instances())
-
     # ── 仪器访问 ──────────────────────────────────────────────────────
 
     @property
     def dmm(self) -> KEYSIGHT_34970A | None:
-        """返回第一台 DMM（单通道兼容）。"""
-        if self._dmm_list and len(self._dmm_connected_list) > 0 and self._dmm_connected_list[0]:
-            return self._dmm_list[0]
-        return None
-
-    def get_dmm(self, index: int = 0) -> KEYSIGHT_34970A | None:
-        """按索引获取 DMM 实例。index=0 是第一台..."""
-        if 0 <= index < len(self._dmm_list) and index < len(self._dmm_connected_list):
-            return self._dmm_list[index] if self._dmm_connected_list[index] else None
-        return None
+        return self._dmm if self._dmm_connected else None
 
     @property
     def ps(self) -> IT6382 | None:
@@ -146,13 +123,7 @@ class InstrumentManager(QObject):
 
     @property
     def dmm_connected(self) -> bool:
-        """第一台 DMM 是否连接（单通道兼容）。"""
-        return len(self._dmm_connected_list) > 0 and self._dmm_connected_list[0]
-
-    def dmm_instance_connected(self, index: int) -> bool:
-        if 0 <= index < len(self._dmm_connected_list):
-            return self._dmm_connected_list[index]
-        return False
+        return self._dmm_connected
 
     @property
     def ps_connected(self) -> bool:
@@ -164,11 +135,12 @@ class InstrumentManager(QObject):
 
     @property
     def all_connected(self) -> bool:
-        return self.dmm_connected and self._ps_connected and self._relay_connected
+        return self._dmm_connected and self._ps_connected and self._relay_connected
 
     # ── 自动检测（后台线程）────────────────────────────────────────────
 
     def start_auto_check(self):
+        """启动后台线程自动检测连接所有仪器。"""
         if self._checking:
             return
         self._checking = True
@@ -177,51 +149,42 @@ class InstrumentManager(QObject):
         thread.start()
 
     def _auto_check_devices(self):
-        self._check_all_dmms()
+        """按顺序检测三台仪器，通过信号通知每台结果。"""
+        self._check_34970A()
         self._check_it6382()
         self._check_relayboard()
         self._checking = False
         self.signal_all_checked.emit()
         logger.info("InstrumentManager: 仪器检测完成")
 
-    # ── DMM 检测 ──────────────────────────────────────────────────────
+    # ── 单台仪器检测 ──────────────────────────────────────────────────
 
-    def _check_all_dmms(self):
-        """检测所有配置的 34970A 实例。"""
-        dmm_instances = self._get_dmm_instances()
-        self._dmm_list = [None] * len(dmm_instances)
-        self._dmm_connected_list = [False] * len(dmm_instances)
-
-        for i, inst_cfg in enumerate(dmm_instances):
-            self._check_one_dmm(i, inst_cfg)
-
-    def _check_one_dmm(self, index: int, inst_cfg: dict):
-        """检测单台 34970A。"""
-        mode = inst_cfg.get("mode", "usb")
+    def _check_34970A(self):
+        mode = self._config.get("dmm_mode", "usb")
         if mode == "gpib":
-            port = inst_cfg.get("gpib", "11")
+            port = self._config.get("dmm_gpib", "11")
         else:
-            port = inst_cfg.get("port", "/dev/cu.usbserial-FTDH1RD8")
+            port = self._config.get("dmm_port", "/dev/cu.usbserial-FTDH1RD8")
 
-        dev_name = f"34970A_{index + 1}"
-        self.signal_device_status.emit(dev_name, False, f"检测中 ({port})...")
-        logger.info(f"检查 {dev_name} (模式: {mode}, 端口: {port})...")
+        self.signal_device_status.emit("34970A", False, f"检测中 ({port})...")
+        logger.info(f"检查 34970A (模式: {mode}, 端口: {port})...")
 
         try:
             dmm = KEYSIGHT_34970A(gpipID=9, serial_port=port)
             if dmm.dmm_instrument():
                 idn = dmm.query_IDN() or "IDN 查询失败"
                 dmm.set_DMMcls()
-                self._dmm_list[index] = dmm
-                self._dmm_connected_list[index] = True
-                self.signal_device_status.emit(dev_name, True, idn.strip())
-                logger.info(f"{dev_name} 连接成功: {idn.strip()}")
+                self._dmm = dmm
+                self._dmm_connected = True
+                self.signal_device_status.emit("34970A", True, idn.strip())
+                logger.info(f"34970A 连接成功: {idn.strip()}")
             else:
-                self.signal_device_status.emit(dev_name, False, "未找到仪器")
-                logger.warning(f"{dev_name} 未找到仪器")
+                self.signal_device_status.emit("34970A", False, "未找到仪器")
+                logger.warning("34970A 未找到仪器")
         except Exception as e:
-            self.signal_device_status.emit(dev_name, False, f"错误: {e}")
-            logger.error(f"{dev_name} 检测异常: {e}")
+            self._dmm_connected = False
+            self.signal_device_status.emit("34970A", False, f"错误: {e}")
+            logger.error(f"34970A 检测异常: {e}")
 
     def _check_it6382(self):
         mode = self._config.get("ps_mode", "gpib")
@@ -280,13 +243,10 @@ class InstrumentManager(QObject):
     # ── 手动重连 ──────────────────────────────────────────────────────
 
     def reconnect_device(self, device_name: str):
-        """手动重新连接指定仪器。device_name 如 '34970A_1' 或 '34970A'。"""
-        if device_name.startswith("34970A"):
-            idx = _parse_dmm_index(device_name)
-            self._disconnect_dmm(idx)
-            dmm_list = self._get_dmm_instances()
-            if 0 <= idx < len(dmm_list):
-                self._check_one_dmm(idx, dmm_list[idx])
+        """手动重新连接指定仪器。"""
+        if device_name == "34970A":
+            self._disconnect_dmm()
+            self._check_34970A()
         elif device_name == "IT6382":
             self._disconnect_ps()
             self._check_it6382()
@@ -296,10 +256,9 @@ class InstrumentManager(QObject):
 
     def disconnect_device(self, device_name: str):
         """断开指定仪器并通知 UI。"""
-        if device_name.startswith("34970A"):
-            idx = _parse_dmm_index(device_name)
-            self._disconnect_dmm(idx)
-            self.signal_device_status.emit(device_name, False, "已断开")
+        if device_name == "34970A":
+            self._disconnect_dmm()
+            self.signal_device_status.emit("34970A", False, "已断开")
         elif device_name == "IT6382":
             self._disconnect_ps()
             self.signal_device_status.emit("IT6382", False, "已断开")
@@ -308,22 +267,21 @@ class InstrumentManager(QObject):
             self.signal_device_status.emit("Relayboard", False, "已断开")
 
     def reconnect_all(self):
+        """断开并重新检测所有仪器。"""
         self._disconnect_all()
         thread = threading.Thread(target=self._auto_check_devices, daemon=True)
         thread.start()
 
     # ── 断开 ──────────────────────────────────────────────────────────
 
-    def _disconnect_dmm(self, index: int = 0):
-        if index < len(self._dmm_list) and self._dmm_list[index]:
+    def _disconnect_dmm(self):
+        if self._dmm:
             try:
-                self._dmm_list[index].close()
+                self._dmm.close()
             except Exception:
                 pass
-        if index < len(self._dmm_list):
-            self._dmm_list[index] = None
-        if index < len(self._dmm_connected_list):
-            self._dmm_connected_list[index] = False
+        self._dmm = None
+        self._dmm_connected = False
 
     def _disconnect_ps(self):
         if self._ps:
@@ -344,21 +302,11 @@ class InstrumentManager(QObject):
         self._relay_connected = False
 
     def _disconnect_all(self):
-        for i in range(len(self._dmm_list)):
-            self._disconnect_dmm(i)
+        self._disconnect_dmm()
         self._disconnect_ps()
         self._disconnect_relay()
 
     def shutdown(self):
+        """程序退出时断开所有仪器。"""
         self._disconnect_all()
         logger.info("InstrumentManager: 所有仪器已断开")
-
-
-def _parse_dmm_index(device_name: str) -> int:
-    """从设备名解析 DMM 索引。'34970A'→0, '34970A_1'→0, '34970A_2'→1。"""
-    if "_" in device_name:
-        try:
-            return int(device_name.split("_")[1]) - 1
-        except (ValueError, IndexError):
-            pass
-    return 0

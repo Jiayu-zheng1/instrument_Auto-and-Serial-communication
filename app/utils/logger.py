@@ -1,4 +1,15 @@
-"""模块化 Logger — 每个模块独立日志文件，统一控制台输出。
+"""模块化 Logger — 按天分文件，历史日志归档到日期文件夹。
+
+目录结构:
+    ~/Documents/SpartaLog/TopLevelLog/
+    ├── InstrumentManager.log          ← 今天的活跃日志
+    ├── ChannelRunner.log
+    ├── 2026-06-02/                    ← 历史：每天一个文件夹
+    │   ├── InstrumentManager.log
+    │   └── ChannelRunner.log
+    └── 2026-06-01/
+        └── ...
+
 用法:
     from app.utils.logger import get_logger
     logger = get_logger("DUT")
@@ -11,50 +22,85 @@ import sys
 import os
 import threading
 import time
-import queue
 import shutil
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  后台轮转搬运
+#  常量
 # ═══════════════════════════════════════════════════════════════════════════
 
-_rotate_q: "queue.Queue" = queue.Queue()
+LOG_DIR = Path(os.path.expanduser("~/Documents/SpartaLog/TopLevelLog"))
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  全局状态
+# ═══════════════════════════════════════════════════════════════════════════
+
 _initialized = False
 _init_lock = threading.Lock()
 _module_ids: dict[str, int] = {}
-LOG_DIR = Path(os.path.expanduser("~/Documents/SpartaLog/TopLevelLog"))
-ARCHIVE_DIR = LOG_DIR / "archive"
-
-
-def _start_worker():
-    def _worker():
-        while True:
-            src, archive_dir, keep_days = _rotate_q.get()
-            try:
-                sub_dir = archive_dir / Path(src).stem.split(".")[0]
-                sub_dir.mkdir(parents=True, exist_ok=True)
-                dst = sub_dir / Path(src).name
-                for _ in range(10):
-                    try:
-                        shutil.move(src, dst)
-                        break
-                    except Exception:
-                        time.sleep(0.2)
-                cutoff = time.time() - keep_days * 86400
-                for f in archive_dir.rglob("*.log"):
-                    try:
-                        if f.is_file() and f.stat().st_mtime < cutoff:
-                            f.unlink(missing_ok=True)
-                    except Exception:
-                        pass
-            finally:
-                _rotate_q.task_done()
-
-    threading.Thread(target=_worker, daemon=True).start()
-
 
 _worker_started = False
 _worker_lock = threading.Lock()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  后台归档工作线程
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _archive_worker():
+    """每分钟扫描一次：把轮转后的旧日志移入日期文件夹 + 清理过期日期文件夹。"""
+    from app.utils.config import load_config
+
+    while True:
+        time.sleep(60)
+        try:
+            cfg = load_config()
+            keep_days = cfg.get("log_retention_days", 90)
+            cutoff = time.time() - keep_days * 86400
+
+            # 扫描 loguru 轮转产生的旧文件: <Name>.log.<timestamp>
+            for f in LOG_DIR.glob("*.log.*"):
+                try:
+                    name = f.name
+                    # "InstrumentManager.log.2026-06-02_10-07-01_330179"
+                    base, ts_suffix = name.split(".log.", 1)
+                    date_str = ts_suffix[:10]  # "2026-06-02"
+
+                    date_dir = LOG_DIR / date_str
+                    date_dir.mkdir(parents=True, exist_ok=True)
+                    dst = date_dir / f"{base}.log"
+
+                    # 如果目标已存在，合并追加（同一天多次轮转）
+                    if dst.exists():
+                        with open(f, "r", encoding="utf-8", errors="ignore") as src_f:
+                            with open(dst, "a", encoding="utf-8") as dst_f:
+                                dst_f.write(src_f.read())
+                        f.unlink()
+                    else:
+                        shutil.move(str(f), str(dst))
+                except Exception:
+                    pass
+
+            # 清理过期的日期文件夹
+            for date_dir in LOG_DIR.iterdir():
+                if not date_dir.is_dir():
+                    continue
+                if len(date_dir.name) != 10 or date_dir.name[4] != "-":
+                    continue  # 不是 YYYY-MM-DD 格式，跳过
+                try:
+                    # 如果文件夹内所有文件都早于截止时间，删除整个文件夹
+                    files = list(date_dir.iterdir())
+                    if files and all(
+                        f.stat().st_mtime < cutoff for f in files if f.is_file()
+                    ):
+                        shutil.rmtree(date_dir)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+
+def _start_worker():
+    threading.Thread(target=_archive_worker, daemon=True).start()
 
 
 def _ensure_worker():
@@ -81,7 +127,6 @@ def _init_once():
             return
 
         LOG_DIR.mkdir(parents=True, exist_ok=True)
-        ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 
         _logger.remove()
 
@@ -114,15 +159,12 @@ def ensure_module(module_name: str):
 
     log_file = LOG_DIR / f"{module_name}.log"
 
-    # 轮转钩子：把旧文件移入 archive/
-    def _rotate_hook(path: str):
-        _rotate_q.put((Path(path), ARCHIVE_DIR, 90))
-
     file_id = _logger.add(
         log_file,
         format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<5} | {message}",
         level="DEBUG",
-        rotation="00:00",
+        rotation="00:00",           # 每天午夜轮转
+        retention=2,                 # 保留最近2个轮转文件（当天+昨天），更多由 worker 搬走
         compression=None,
         encoding="utf-8",
         enqueue=True,
