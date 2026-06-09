@@ -44,9 +44,11 @@ python main.py
 - **Location ID 精准匹配** — ioreg IOTTYSuffix 4 级匹配识别 USB 设备，解决同 hub 下串口号混淆
 - **Hex 指令协议** — `055A...0D0A` 格式，支持纯 hex 和 hex+regex 值提取
 - **Config 驱动测试** — 测试逻辑完全由 Limits.csv 的 config 列定义，无需改代码
+- **Config 新旧兼容** — 同时支持 `('key':'val')` 旧格式和 `hex_cmd 055A...` Atlas2 风格空格分隔新格式
 - **仪器控制** — 34970A（USB/GPIB，电阻/电压扫描+单点测量）、IT6382（3 路电源输出）、8 路继电器板（v0/v1 两版硬件）
 - **Fail 即停** — 失败后跳过后续项（可开关）
 - **SFC 上报** — 在线模式下 connect → checkRoute → uploadResult（OK/NG）
+- **面向对象架构** — BaseInstrument 仪器抽象基类、BaseTestRunner 模板方法基类、MEASUREMENT_MAP 动态方法绑定
 - **macOS 风格设置页** — 左侧标签栏 + 右侧滚动卡片，滚动联动高亮，密码 "123" 解锁
 - **SN 通道后缀** — 多通道模式下 SN 自动加 `_CH1`、`_CH2` 后缀区分测试归属
 
@@ -66,37 +68,42 @@ Read_data/
 └── app/
     ├── application.py               # QApplication 启动
     ├── controllers/
-    │   ├── test_runner.py           # 单通道测试执行线程（QThread）
-    │   ├── channel_runner.py        # 多通道测试执行器（每通道独立线程）
-    │   ├── instrument_manager.py    # 仪器管理器单例（后台检测+Qt信号）
-    │   ├── dut_monitor.py           # DUT 插拔监控（ioreg + location ID）
-    │   └── log_controller.py        # loguru → Qt 信号桥接
+    │   ├── base_runner.py            # 测试执行引擎基类（模板方法模式）
+    │   ├── test_runner.py            # 单通道测试执行（SFC + CSV）
+    │   ├── channel_runner.py         # 多通道测试执行（通道日志 + 串口定位）
+    │   ├── instrument_manager.py     # 仪器管理器单例（多态 _check_instrument）
+    │   ├── dut_monitor.py            # DUT 插拔监控（ioreg + location ID）
+    │   └── log_controller.py         # loguru → Qt 信号桥接
     ├── models/
-    │   ├── device.py                # DUT 串口通信 + USB 定位
-    │   ├── test_item.py             # 测试业务逻辑核心
-    │   ├── test_config.py           # CSV 行解析 + Pass/Fail 判定
-    │   ├── sfc_connector.py         # SFC HTTP 上报
+    │   ├── device.py                 # DUT 串口通信 + USB 定位
+    │   ├── test_item.py              # 测试业务逻辑核心
+    │   ├── test_config.py            # CSV 行解析 + Pass/Fail 判定
+    │   ├── sfc_connector.py          # SFC HTTP 上报
+    │   ├── measurement_registry.py   # 75 个测量信号 → (类型, 通道) 映射
+    │   ├── dut_info.py               # DUT 身份信息容器 (dataclass)
     │   └── instruments/
-    │       ├── keysight_34970a.py   # 34970A DMM（USB 串口/GPIB，批量扫描）
-    │       ├── ps_it6382.py         # IT6382 可编程电源（3 通道）
-    │       └── relay_board.py       # 继电器板（v0/v1 两版）
+    │       ├── base.py               # BaseInstrument ABC（统一 connect/disconnect/identity）
+    │       ├── keysight_34970a.py    # 34970A DMM（USB 串口/GPIB，批量扫描）
+    │       ├── ps_it6382.py          # IT6382 可编程电源（3 通道）
+    │       └── relay_board.py        # 继电器板（v0/v1 两版）
     ├── views/
-    │   ├── main_window.py           # 主窗口（菜单栏 + QStackedWidget）
-    │   ├── control_bar.py           # 顶栏（仪器状态/S N/Start/计时器）
-    │   ├── status_header.py         # 状态卡片（Input/Fail/Yield/状态）
-    │   ├── test_table.py            # 测试结果表格
-    │   ├── log_panel.py             # 实时日志面板
-    │   ├── settings_dialog.py       # macOS 风格设置（5 标签页）
-    │   ├── channel_tab.py           # 多通道单通道 Tab（SN+表格+日志）
-    │   ├── summary_tab.py           # 多通道汇总 Tab（网格 PASS/FAIL）
-    │   ├── animations.py            # 脉冲呼吸 / 淡入淡出
-    │   └── theme.py                 # Apple HIG 主题（色彩/字体/QSS）
+    │   ├── main_window.py            # 主窗口（菜单栏 + QStackedWidget）
+    │   ├── control_bar.py            # 顶栏（仪器状态/SN/Start/计时器）
+    │   ├── status_header.py          # 状态卡片（Input/Fail/Yield/状态）
+    │   ├── test_table.py             # 测试结果表格
+    │   ├── log_panel.py              # 实时日志面板
+    │   ├── settings_dialog.py        # macOS 风格设置（5 标签页）
+    │   ├── channel_tab.py            # 多通道单通道 Tab（SN+表格+日志）
+    │   ├── summary_tab.py            # 多通道汇总 Tab（网格 PASS/FAIL）
+    │   ├── animations.py             # 脉冲呼吸 / 淡入淡出
+    │   └── theme.py                  # Apple HIG 主题（色彩/字体/QSS）
     └── utils/
-        ├── config.py                # 系统配置读写
-        ├── constants.py             # 全局常量
-        ├── limits_loader.py         # Limits.csv 加载解析
-        ├── logger.py                # 模块化日志（按天轮转+归档+过期清理）
-        └── csv_handler.py           # 测试结果 CSV 生成
+        ├── config.py                 # 系统配置读写
+        ├── config_parser.py          # Config 列解析（旧/新格式兼容）
+        ├── constants.py              # 全局常量
+        ├── limits_loader.py          # Limits.csv 加载解析
+        ├── logger.py                 # 模块化日志（按天轮转+归档+过期清理）
+        └── csv_handler.py            # 测试结果 CSV 生成
 ```
 
 ## 配置系统
