@@ -1,8 +1,10 @@
-"""Test runner — QThread-based test execution engine."""
-from PyQt5.QtCore import QThread, pyqtSignal
+"""Test runner — 单通道测试执行引擎。"""
+
+from PyQt5.QtCore import pyqtSignal
 from app.utils.logger import get_logger
 
 logger = get_logger("TestRunner")
+from app.controllers.base_runner import BaseTestRunner
 from app.models.test_item import TestItem
 from app.models.test_config import TestConfig, load_test_configs
 from app.models.sfc_connector import SFCConnector
@@ -10,8 +12,8 @@ from app.utils.csv_handler import CsvReport
 from app.utils.config import load_config
 
 
-class TestRunner(QThread):
-    """Runs test items in sequence on a background thread."""
+class TestRunner(BaseTestRunner):
+    """单通道测试线程：顺序执行 CSV 测试项，支持 SFC 上报和 CSV 报表。"""
 
     signal_value = pyqtSignal(str, str)
     signal_result = pyqtSignal(str, str)
@@ -31,6 +33,22 @@ class TestRunner(QThread):
         self.lower_limit_map: dict = {}
         self.upper_limit_map: dict = {}
 
+    # ── 钩子实现 ──
+
+    def _emit_value(self, test_item: str, value: str):
+        self.signal_value.emit(test_item, value)
+
+    def _emit_result(self, test_item: str, label: str):
+        self.signal_result.emit(test_item, label)
+
+    def _emit_color(self, test_item: str, color: str):
+        self.signal_color.emit(test_item, color)
+
+    def _log(self, msg: str):
+        logger.info(msg)
+
+    # ── 主循环 ──
+
     def run(self):
         logger.info("Starting test")
         self._test_status = True
@@ -38,7 +56,9 @@ class TestRunner(QThread):
         self._load_configs()
         self._log_controller._path_logger()
         self._load_system_config()
-        csv_report = CsvReport(self.test_items, self.upper_limit_map, self.lower_limit_map)
+        csv_report = CsvReport(
+            self.test_items, self.upper_limit_map, self.lower_limit_map
+        )
 
         for cfg in self.configs:
             try:
@@ -59,7 +79,6 @@ class TestRunner(QThread):
                 logger.info(f"Error running test item {cfg.test_item}: {e}")
                 self._test_status = False
 
-            # fail_stop_test：失败时立即停止后续测试
             if self._fail_stop and not self._test_status:
                 logger.info("Fail-stop 已启用，停止后续测试")
                 break
@@ -67,16 +86,14 @@ class TestRunner(QThread):
             if self.test_unit.FGSN:
                 self.signal_display.emit(self.ScanSN, self.test_unit.FGSN)
 
-        csv_report.set_csv_file(self.test_unit.FGSN,
-                                {c.test_item: getattr(self, '_last_value', None) for c in self.configs})
-
-        # 上报 SFC
+        csv_report.set_csv_file(
+            self.test_unit.FGSN,
+            {c.test_item: getattr(self, "_last_value", None) for c in self.configs},
+        )
         self._upload_sfc()
-
         self.stop()
 
     def _load_system_config(self):
-        """统一加载系统配置。"""
         cfg = load_config()
         self._fail_stop = cfg.get("fail_stop_test", True)
         self._sfc_cfg = {
@@ -84,10 +101,11 @@ class TestRunner(QThread):
             "online": cfg.get("sfc_online", False),
             "vip": cfg.get("sfc_vip", ""),
         }
-        logger.info(f"系统配置已加载: fail_stop={self._fail_stop}, sfc_online={self._sfc_cfg.get('online')}")
+        logger.info(
+            f"系统配置已加载: fail_stop={self._fail_stop}, sfc_online={self._sfc_cfg.get('online')}"
+        )
 
     def _upload_sfc(self):
-        """向 SFC 上报测试结果（仅在线模式）。"""
         if not self._sfc_cfg.get("online") or not self._sfc_cfg.get("url"):
             return
         sn = self.ScanSN or self.test_unit.FGSN or ""
@@ -103,7 +121,9 @@ class TestRunner(QThread):
             sfc.connect()
             sfc.check_route(sn)
             sfc.upload_result(sn, self._test_status)
-            logger.info(f"SFC 上传完成: SN={sn}, status={'PASS' if self._test_status else 'FAIL'}")
+            logger.info(
+                f"SFC 上传完成: SN={sn}, status={'PASS' if self._test_status else 'FAIL'}"
+            )
         except Exception as e:
             logger.error(f"SFC 上传失败: {e}")
 
@@ -118,33 +138,3 @@ class TestRunner(QThread):
         self.test_items = [c.test_item for c in self.configs]
         self.lower_limit_map = {c.test_item: c.lower_limit_raw for c in self.configs}
         self.upper_limit_map = {c.test_item: c.upper_limit_raw for c in self.configs}
-
-    def _run_one(self, display: str, method: str, config: dict):
-        # run_read_cmd 是通用配置处理器，总是走它（即使 config 为空也让它自己处理）
-        if method == "run_read_cmd":
-            raw_hex, ascii_str, value = self.test_unit.run_read_cmd(method, config)
-        elif config:
-            raw_hex, ascii_str, value = self.test_unit.run_read_cmd(method, config)
-        elif hasattr(self.test_unit, method):
-            test_function = getattr(self.test_unit, method)
-            value = test_function()
-            raw_hex, ascii_str = "", ""
-        else:
-            logger.info(f"No config and no method '{method}' — skipping")
-            value = None
-            raw_hex, ascii_str = "", ""
-
-        # 记录原始返回值和 ASCII 值到日志文件（仅当有 hex_cmd 时）
-        if config.get("hex_cmd") and raw_hex:
-            logger.debug(f"[{display}] raw: {raw_hex} | ascii: {ascii_str}")
-
-        self._last_value = value
-        return value
-
-    def _evaluate_result(self, test_item: str, value: str, cfg: TestConfig):
-        passed, label = cfg.evaluate(value)
-        self.signal_value.emit(test_item, value)
-        self.signal_result.emit(test_item, label)
-        self.signal_color.emit(test_item, label)
-        if not passed:
-            self._test_status = False

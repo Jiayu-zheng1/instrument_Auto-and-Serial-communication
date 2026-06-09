@@ -1,7 +1,6 @@
 """Test configuration model — CSV row parsing and validation."""
-import json
-import ast
 from app.utils.logger import get_logger
+from app.utils.config_parser import parse_config
 
 logger = get_logger("Config")
 
@@ -77,66 +76,9 @@ def load_test_configs(csv_rows: list[dict]) -> list[TestConfig]:
             test_name=row.get("TestName", "") or row.get("TestItem", ""),
             lower_limit=row.get("LowerLimit", ""),
             upper_limit=row.get("UpperLimit", ""),
-            config=_parse_config_text(row.get("config", "") or row.get("Config", "")),
+            config=parse_config(row.get("config", "") or row.get("Config", "")),
         ))
     return configs
-
-
-def _parse_config_text(config_text) -> dict:
-    if not config_text:
-        return {}
-
-    # 已经由 limits_loader 解析好的 dict，直接返回
-    if isinstance(config_text, dict):
-        return config_text
-
-    # 尝试 JSON 解析
-    try:
-        return json.loads(config_text)
-    except Exception:
-        pass
-
-    # 预处理: CSV 中的 ('key':'val') 格式 -> {'key':'val'}
-    text = config_text.strip()
-    if text.startswith("(") and text.endswith(")"):
-        text = "{" + text[1:-1] + "}"
-
-    try:
-        return ast.literal_eval(text)
-    except Exception:
-        pass
-
-    # 手动解析: 支持 ('key':'val','key2':'val2') 格式
-    return _manual_parse_config(config_text)
-
-
-def _manual_parse_config(config_text: str) -> dict:
-    """手动解析配置字符串，支持 ('key':'val','key2':'val2') 格式。"""
-    result = {}
-    text = config_text.strip()
-
-    # 去掉外层括号
-    if text.startswith("(") and text.endswith(")"):
-        text = text[1:-1]
-    elif text.startswith("("):
-        text = text[1:]
-    elif text.endswith(")"):
-        text = text[:-1]
-
-    if not text:
-        return result
-
-    # 解析 'key':'val' 对
-    import re
-    pattern = r"'([^']+)'\s*:\s*'([^']*)'"
-    matches = re.findall(pattern, text)
-    for key, value in matches:
-        result[key] = value
-
-    if not result:
-        logger.info(f"Error parsing config {config_text}: no key-value pairs found")
-
-    return result
 
 
 def _limit_format(limit: str):

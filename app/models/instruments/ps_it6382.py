@@ -7,13 +7,36 @@ import pyvisa
 import time
 import threading
 
+from app.models.instruments.base import BaseInstrument
+
 thLock = threading.Lock()
 
 
-class IT6382:
+class IT6382(BaseInstrument):
     def __init__(self, gpipID):
         self.gpipID = gpipID
         self.instrument = None
+        self._connected = False
+
+    # ── BaseInstrument 接口 ──
+
+    def connect(self) -> bool:
+        result = self.ps_instrument()
+        self._connected = result is not None
+        return self._connected
+
+    def disconnect(self) -> None:
+        self._connected = False
+        self.close()
+
+    def get_identity(self) -> str | None:
+        return self.query_IDN()
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+    # ── 原有方法 ──
 
     def ps_instrument(self):
         try:
@@ -26,10 +49,12 @@ class IT6382:
                 print("IT6382 未找到仪器")
                 return None
             self.instrument = rm.open_resource(IT6382Res)
+            self._connected = True
             self.output_off_all()
             return self.instrument
         except Exception as e:
             print(f"IT6382 init error: {e}")
+            self._connected = False
             return None
 
     def query_IDN(self):

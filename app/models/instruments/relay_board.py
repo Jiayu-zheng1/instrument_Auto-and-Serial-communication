@@ -6,16 +6,39 @@ import serial
 import time
 import threading
 
+from app.models.instruments.base import BaseInstrument
+
 thLock = threading.Lock()
 
 
-class RELAYBOARD:
+class RELAYBOARD(BaseInstrument):
     def __init__(self, boardVER, port):
         self.hex_values = {}
         self.boardVER = boardVER
         self.port = port
         self.baudrate = ''
         self.ser = None
+        self._connected = False
+
+    # ── BaseInstrument 接口 ──
+
+    def connect(self) -> bool:
+        result = self.init_board()
+        self._connected = result is not None
+        return self._connected
+
+    def disconnect(self) -> None:
+        self._connected = False
+        self.close()
+
+    def get_identity(self) -> str | None:
+        return None  # 继电器板不支持 IDN 查询
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+    # ── 原有方法 ──
 
     def init_board(self):
         """初始化继电器板，按照版本加载命令表"""
@@ -51,9 +74,11 @@ class RELAYBOARD:
 
         try:
             self.ser = serial.Serial(self.port, self.baudrate, timeout=1)
+            self._connected = True
             return self.ser
         except Exception as e:
             print(f"Relayboard init error: {e}")
+            self._connected = False
             return None
 
     def relay_ON(self, channel):

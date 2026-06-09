@@ -15,12 +15,35 @@ logger = logging.getLogger("KEYSIGHT_34970A")
 USB_BAUDRATE = 9600
 
 
-class KEYSIGHT_34970A:
+from app.models.instruments.base import BaseInstrument
+
+
+class KEYSIGHT_34970A(BaseInstrument):
 
     def __init__(self, gpipID, serial_port: str = ""):
         self.gpipID = gpipID
         self.serial_port = serial_port
         self.instrument = None
+        self._connected = False
+
+    # ── BaseInstrument 接口 ──
+
+    def connect(self) -> bool:
+        """建立连接。返回 True 表示成功。"""
+        result = self.dmm_instrument()
+        self._connected = result is not None
+        return self._connected
+
+    def disconnect(self) -> None:
+        self._connected = False
+        self.close()
+
+    def get_identity(self) -> str | None:
+        return self.query_IDN()
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
 
     def dmm_instrument(self):
         with thLock:
@@ -42,6 +65,7 @@ class KEYSIGHT_34970A:
                     self._connect_usb(port)
 
                 if self.instrument:
+                    self._connected = True
                     return self.instrument
 
                 # ── 兜底：扫描 GPIB 资源列表 ──
@@ -50,6 +74,7 @@ class KEYSIGHT_34970A:
                 for res in rm.list_resources():
                     if gpib_addr in res:
                         self.instrument = rm.open_resource(gpib_addr)
+                        self._connected = True
                         logger.info(f'34970A GPIB 连接成功: {gpib_addr}')
                         return self.instrument
 
@@ -74,12 +99,14 @@ class KEYSIGHT_34970A:
             self.instrument.write('*CLS')
             time.sleep(0.2)
             idn = self.instrument.query('*IDN?').strip()
+            self._connected = True
             logger.info(f'34970A USB 连接成功: {port} -> {idn}')
         except Exception as e:
             logger.error(f'34970A USB 连接失败 ({port}): {e}')
             import traceback
             logger.error(traceback.format_exc())
             self.instrument = None
+            self._connected = False
 
     def _connect_gpib(self, resource_str: str):
         """GPIB 资源字符串直连 (NI-VISA)。"""
@@ -360,5 +387,6 @@ class KEYSIGHT_34970A:
                 if self.instrument:
                     self.instrument.close()
                     self.instrument = None
+                self._connected = False
             except Exception as e:
                 print(f"An error occurred: {e}")

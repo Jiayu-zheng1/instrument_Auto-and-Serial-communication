@@ -7,6 +7,7 @@ from app.utils.logger import get_logger
 
 logger = get_logger("DUT")
 from app.models.device import Device, get_ports
+from app.models.measurement_registry import MEASUREMENT_MAP
 
 verRex = re.compile(r"Application\s\W\d\d\W\S\s(\w*)")
 uvpRex = re.compile(r"Reset Count:\s(\d+)")
@@ -25,13 +26,27 @@ lockVerRex = re.compile(r"0000\W:(\S\S)")
 class TestItem:
     """Encapsulates all DUT test procedures."""
 
-    def __init__(self, instrument_manager=None):
+    def __init__(self, instrument_manager=None, *, dmm=None, ps=None, relay=None):
         self.FGSN = None
         self.dut = None
         self.ScanSN = None
         self._scan_cache: dict[str, dict[str, float]] = {}
-        self._mgr = instrument_manager  # 由调用方注入
+        self._mgr = instrument_manager  # 由调用方注入（向后兼容）
+        self._injected_dmm = dmm       # 直接注入仪器（优先于 _mgr）
+        self._injected_ps = ps
+        self._injected_relay = relay
         self._dut_port: str | None = "__unset__"  # "__unset__"=自动探测, None=DUT不存在, str=指定串口
+        self._bind_measurement_methods()
+
+    def _bind_measurement_methods(self):
+        """根据 MEASUREMENT_MAP 动态绑定测量方法，替代 74 个手写方法。"""
+        for method_name, (mtype, channel) in MEASUREMENT_MAP.items():
+            if mtype == "resistance":
+                setattr(self, method_name,
+                        lambda ch=channel: self._get_resistance(ch))
+            elif mtype == "voltage":
+                setattr(self, method_name,
+                        lambda ch=channel: self._get_voltage(ch))
 
     def connent_dut(self, timeout=5):
         # DUT 串口明确不存在（多通道模式下 location_id 搜不到）
@@ -81,13 +96,39 @@ class TestItem:
     def run_read_cmd(self, method_name, config):
         """按 config 执行测试，method_name 为 TestName（匹配 TestItem 方法）。
         返回 (raw_hex, ascii_str, result) 元组。
+
+        支持两种 config 格式：
+        - 旧格式: {"hex_cmd": "055A...", "regex": "pat", "group": "1"}
+        - 新格式: {"action": "hex_cmd", "args": ["055A...", "pat", "1", "1"]}
         """
         action = config.get("action", "")
+        new_args = config.get("args", [])
+
+        # ── action dispatch ──
         if action == "method":
-            target = config.get("method") or method_name
+            target = new_args[0] if new_args else (config.get("method") or method_name)
+            extra = new_args[1:] if len(new_args) > 1 else []
+            if extra:
+                return "", "", getattr(self, target)(*extra)
             return "", "", getattr(self, target)()
+
         if action == "connect":
             return "", "", "PASSED" if self.connent_dut() else "FAILED"
+
+        # ── 新格式 args → 旧格式 config dict 兼容 ──
+        # hex_cmd args: [hex_value, regex?, group?, delay?]
+        # cmd args:     [cmd_value, regex?, group?, delay?]
+        config = dict(config)  # 不污染原始 config
+        if action in ("hex_cmd", "cmd") and new_args:
+            config.setdefault(action, new_args[0])
+            if len(new_args) > 1:
+                config.setdefault("regex", new_args[1])
+            if len(new_args) > 2:
+                config.setdefault("group", new_args[2])
+            if len(new_args) > 3:
+                config.setdefault("delay", new_args[3])
+
+        # ── 通用 config 处理器（旧格式和新格式都走这里）──
 
         # DUT 未连接时直接返回空值，不 crash
         if self.dut is None:
@@ -316,32 +357,45 @@ class TestItem:
             return False
 
     # ═══════════════════════════════════════════════════════════════════════
-    #  仪器访问层 — _mgr 由构造函数注入
+    #  仪器访问层 — 优先直接注入，回退到 _mgr
     # ═══════════════════════════════════════════════════════════════════════
 
     @property
     def _dmm(self):
-        return self._mgr.dmm
+        # 直接注入的仪器优先
+        if self._injected_dmm is not None:
+            return self._injected_dmm
+        return self._mgr.dmm if self._mgr else None
 
     @property
     def _ps(self):
-        return self._mgr.ps
+        if self._injected_ps is not None:
+            return self._injected_ps
+        return self._mgr.ps if self._mgr else None
 
     @property
     def _relay(self):
-        return self._mgr.relay
+        if self._injected_relay is not None:
+            return self._injected_relay
+        return self._mgr.relay if self._mgr else None
 
     @property
     def _dmm_ok(self) -> bool:
-        return self._mgr.dmm_connected
+        if self._injected_dmm is not None:
+            return self._injected_dmm.is_connected
+        return self._mgr.dmm_connected if self._mgr else False
 
     @property
     def _ps_ok(self) -> bool:
-        return self._mgr.ps_connected
+        if self._injected_ps is not None:
+            return self._injected_ps.is_connected
+        return self._mgr.ps_connected if self._mgr else False
 
     @property
     def _relay_ok(self) -> bool:
-        return self._mgr.relay_connected
+        if self._injected_relay is not None:
+            return self._injected_relay.is_connected
+        return self._mgr.relay_connected if self._mgr else False
 
     # ═══════════════════════════════════════════════════════════════════════
     #  批量扫描 — 数据存入 _scan_cache，供后续独立测量方法读取
@@ -391,7 +445,7 @@ class TestItem:
         return "PASSED"
 
     # ═══════════════════════════════════════════════════════════════════════
-    #  Slot 1 电阻独立测量 (101–120)
+    #  单点测量 — MEASUREMENT_MAP 动态方法依赖
     # ═══════════════════════════════════════════════════════════════════════
 
     def _get_resistance(self, channel: str):
@@ -404,125 +458,6 @@ class TestItem:
         logger.info(f"[RAW] 阻抗 ch{channel} = {val} Ω")
         return val
 
-    def Measure_Impedance_PP_VBUS_USBC_To_GND(self):
-        return self._get_resistance("101")
-
-    def Measure_Impedance_PP_VBUS_RVP_To_GND(self):
-        return self._get_resistance("102")
-
-    def Measure_Impedance_PP_VBUS_OUT_To_GND(self):
-        return self._get_resistance("103")
-
-    def Measure_Impedance_PP_VBUS_CONN_To_GND(self):
-        return self._get_resistance("104")
-
-    def Measure_Impedance_PP_VBATP_CON_To_GND(self):
-        return self._get_resistance("105")
-
-    def Measure_Impedance_PP1V2_BUCK_OUT_To_GND(self):
-        return self._get_resistance("106")
-
-    def Measure_Impedance_PP_PMID_CHG_To_GND(self):
-        return self._get_resistance("107")
-
-    def Measure_Impedance_PP_VSYS_CHG_To_GND(self):
-        return self._get_resistance("108")
-
-    def Measure_Impedance_PP_CHG_REGN_LDO_To_GND(self):
-        return self._get_resistance("109")
-
-    def Measure_Impedance_PP_VBUS_HB_To_GND(self):
-        return self._get_resistance("110")
-
-    def Measure_Impedance_PP1V8_SUR_TON_RIGHT_To_GND(self):
-        return self._get_resistance("111")
-
-    def Measure_Impedance_PP1V8_SUR_TON_LEFT_To_GND(self):
-        return self._get_resistance("112")
-
-    def Measure_Impedance_PP_LP5811_BOOST_To_GND(self):
-        return self._get_resistance("113")
-
-    def Measure_Impedance_PP_VCHG_IN_To_GND(self):
-        return self._get_resistance("114")
-
-    def Measure_Impedance_PP_VBAT_To_GND(self):
-        return self._get_resistance("115")
-
-    def Measure_Impedance_PP_VSYS_To_GND(self):
-        return self._get_resistance("116")
-
-    def Measure_Impedance_PP_VAUD_To_GND(self):
-        return self._get_resistance("117")
-
-    def Measure_Impedance_PP1V8_VIO_To_GND(self):
-        return self._get_resistance("118")
-
-    def Measure_Impedance_PP1V8_VDIG18_To_GND(self):
-        return self._get_resistance("119")
-
-    def Measure_Impedance_PP3V1_VDD31_To_GND(self):
-        return self._get_resistance("120")
-
-    # ═══════════════════════════════════════════════════════════════════════
-    #  Slot 2 电阻独立测量 (201–217)
-    # ═══════════════════════════════════════════════════════════════════════
-
-    def Measure_Impedance_PP1V8_VA18_To_GND(self):
-        return self._get_resistance("201")
-
-    def Measure_Impedance_PP_VPA_To_GND(self):
-        return self._get_resistance("202")
-
-    def Measure_Impedance_PP_DVDD_MLDO_To_GND(self):
-        return self._get_resistance("203")
-
-    def Measure_Impedance_FSOURCE_D_To_GND(self):
-        return self._get_resistance("204")
-
-    def Measure_Impedance_PP_VOX_CLK_To_GND(self):
-        return self._get_resistance("205")
-
-    def Measure_Impedance_PP_VOX_DAT_To_GND(self):
-        return self._get_resistance("206")
-
-    def Measure_Impedance_PDM_CLK_FF1_FB_To_GND(self):
-        return self._get_resistance("207")
-
-    def Measure_Impedance_PDM_DAT_FF1_FB_To_GND(self):
-        return self._get_resistance("208")
-
-    def Measure_Impedance_PDM_CLK_FF2_FF3_To_GND(self):
-        return self._get_resistance("209")
-
-    def Measure_Impedance_PDM_DAT_FF2_FF3_To_GND(self):
-        return self._get_resistance("210")
-
-    def Measure_Impedance_PP_VDD_To_GND(self):
-        return self._get_resistance("211")
-
-    def Measure_Impedance_CC1_To_GND(self):
-        return self._get_resistance("212")
-
-    def Measure_Impedance_CC2_To_GND(self):
-        return self._get_resistance("213")
-
-    def Measure_Impedance_PP_VCORE_To_GND(self):
-        return self._get_resistance("214")
-
-    def Measure_Impedance_PP_VRF_IN_To_GND(self):
-        return self._get_resistance("215")
-
-    def Measure_Impedance_PP_VRTC_To_GND(self):
-        return self._get_resistance("216")
-
-    def Measure_Impedance_PP_VSRAM_To_GND(self):
-        return self._get_resistance("217")
-
-    # ═══════════════════════════════════════════════════════════════════════
-    #  电压独立测量 (101–109)
-    # ═══════════════════════════════════════════════════════════════════════
-
     def _get_voltage(self, channel: str):
         """直接通过 DMM 测量单通道直流电压 (mV)（不走缓存）。"""
         dmm = self._dmm
@@ -534,142 +469,6 @@ class TestItem:
             logger.info(f"[RAW] 电压 ch{channel} = {val} mV")
             return str(val)
         return "-9999"
-
-    def Measure_Voltage_PP_VBUS_USBC_To_GND(self):
-        return self._get_voltage("101")
-
-    def Measure_Voltage_PP_VBUS_RVP_To_GND(self):
-        return self._get_voltage("102")
-
-    def Measure_Voltage_PP_VBUS_OUT_To_GND(self):
-        return self._get_voltage("103")
-
-    def Measure_Voltage_PP_VBUS_CONN_To_GND(self):
-        return self._get_voltage("104")
-
-    def Measure_Voltage_PP_VBAT_CON_To_GND(self):
-        return self._get_voltage("105")
-
-    def Measure_Voltage_PP1V2_BUCK_OUT_To_GND(self):
-        return self._get_voltage("106")
-
-    def Measure_Voltage_PP_PMID_CHG_To_GND(self):
-        return self._get_voltage("107")
-
-    def Measure_Voltage_PP_VSYS_CHG_To_GND(self):
-        return self._get_voltage("108")
-
-    def Measure_Voltage_PP_CHG_REGN_LDO_To_GND(self):
-        return self._get_voltage("109")
-
-    def Measure_Voltage_PP_VBUS_HB_To_GND(self):
-        return self._get_voltage("110")
-
-    def Measure_Voltage_PP1V8_SUR_TON_RIGHT_To_GND(self):
-        return self._get_voltage("111")
-
-    def Measure_Voltage_PP1V8_SUR_TON_LEFT_To_GND(self):
-        return self._get_voltage("112")
-
-    def Measure_Voltage_PP_LP5811_BOOST_To_GND(self):
-        return self._get_voltage("113")
-
-    def Measure_Voltage_PP_VCHG_IN_To_GND(self):
-        return self._get_voltage("114")
-
-    def Measure_Voltage_PP_VBAT_To_GND(self):
-        return self._get_voltage("115")
-
-    def Measure_Voltage_PP_VSYS_To_GND(self):
-        return self._get_voltage("116")
-
-    def Measure_Voltage_PP_VAUD_To_GND(self):
-        return self._get_voltage("117")
-
-    def Measure_Voltage_PP1V8_VIO_To_GND(self):
-        return self._get_voltage("118")
-
-    def Measure_Voltage_PP1V8_VDIG18_To_GND(self):
-        return self._get_voltage("119")
-
-    def Measure_Voltage_PP3V1_VDD31_To_GND(self):
-        return self._get_voltage("120")
-
-    def Measure_Voltage_PP1V8_VA18_To_GND(self):
-        return self._get_voltage("201")
-
-    def Measure_Voltage_PP_VPA_To_GND(self):
-        return self._get_voltage("202")
-
-    def Measure_Voltage_PP_DVDD_MLDO_To_GND(self):
-        return self._get_voltage("203")
-
-    def Measure_Voltage_FSOURCE_D_To_GND(self):
-        return self._get_voltage("204")
-
-    def Measure_Voltage_PP_VOX_CLK_To_GND(self):
-        return self._get_voltage("205")
-
-    def Measure_Voltage_PP_VOX_DAT_To_GND(self):
-        return self._get_voltage("206")
-
-    def Measure_Voltage_PDM_CLK_FF1_FB_To_GND(self):
-        return self._get_voltage("207")
-
-    def Measure_Voltage_PDM_DAT_FF1_FB_To_GND(self):
-        return self._get_voltage("208")
-
-    def Measure_Voltage_PDM_CLK_FF2_FF3_To_GND(self):
-        return self._get_voltage("209")
-
-    def Measure_Voltage_PDM_DAT_FF2_FF3_To_GND(self):
-        return self._get_voltage("210")
-
-    def Measure_Voltage_PP_VDD_To_GND(self):
-        return self._get_voltage("211")
-
-    def Measure_Voltage_CC1_To_GND(self):
-        return self._get_voltage("212")
-
-    def Measure_Voltage_CC2_To_GND(self):
-        return self._get_voltage("213")
-
-    def Measure_Voltage_PP_VCORE_To_GND(self):
-        return self._get_voltage("214")
-
-    def Measure_Voltage_PP_VRF_IN_To_GND(self):
-        return self._get_voltage("215")
-
-    def Measure_Voltage_PP_VRTC_To_GND(self):
-        return self._get_voltage("216")
-
-    def Measure_Voltage_PP_VSRAM_To_GND(self):
-        return self._get_voltage("217")
-
-    # ═══════════════════════════════════════════════════════════════════════
-    #  单点电压测量 — 不经批量扫描，直接读 DMM
-    # ═══════════════════════════════════════════════════════════════════════
-
-    def Measure_Voltage_PP1V8_SUR_RST_LEFT_To_GND(self):
-        """单点测量通道 112 直流电压 (mV)"""
-        if not self._dmm_ok:
-            return "-9999"
-        val = self._dmm.measure_dcv(112, unit="mV")
-        return str(val) if val is not None else "-9999"
-
-    def Measure_Voltage_PP_VBUS_HB_To_GND(self):
-        """单点测量通道 110 直流电压 (mV)"""
-        if not self._dmm_ok:
-            return "-9999"
-        val = self._dmm.measure_dcv(110, unit="mV")
-        return str(val) if val is not None else "-9999"
-
-    def Measure_Voltage_PP_LP5811_BOOST_To_GND(self):
-        """单点测量通道 113 直流电压 (mV)"""
-        if not self._dmm_ok:
-            return "-9999"
-        val = self._dmm.measure_dcv(113, unit="mV")
-        return str(val) if val is not None else "-9999"
 
     # ═══════════════════════════════════════════════════════════════════════
     #  继电器控制

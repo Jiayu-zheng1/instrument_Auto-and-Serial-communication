@@ -150,43 +150,32 @@ class InstrumentManager(QObject):
 
     def _auto_check_devices(self):
         """按顺序检测三台仪器，通过信号通知每台结果。"""
-        self._check_34970A()
-        self._check_it6382()
-        self._check_relayboard()
+        self._check_dmm()
+        self._check_ps()
+        self._check_relay()
         self._checking = False
         self.signal_all_checked.emit()
         logger.info("InstrumentManager: 仪器检测完成")
 
     # ── 单台仪器检测 ──────────────────────────────────────────────────
 
-    def _check_34970A(self):
+    def _check_dmm(self):
+        """检测 34970A DMM。"""
         mode = self._config.get("dmm_mode", "usb")
-        if mode == "gpib":
-            port = self._config.get("dmm_gpib", "11")
-        else:
-            port = self._config.get("dmm_port", "/dev/cu.usbserial-FTDH1RD8")
+        port = self._config.get("dmm_gpib", "11") if mode == "gpib" else \
+               self._config.get("dmm_port", "/dev/cu.usbserial-FTDH1RD8")
 
         self.signal_device_status.emit("34970A", False, f"检测中 ({port})...")
         logger.info(f"检查 34970A (模式: {mode}, 端口: {port})...")
 
-        try:
-            dmm = KEYSIGHT_34970A(gpipID=9, serial_port=port)
-            if dmm.dmm_instrument():
-                idn = dmm.query_IDN() or "IDN 查询失败"
-                dmm.set_DMMcls()
-                self._dmm = dmm
-                self._dmm_connected = True
-                self.signal_device_status.emit("34970A", True, idn.strip())
-                logger.info(f"34970A 连接成功: {idn.strip()}")
-            else:
-                self.signal_device_status.emit("34970A", False, "未找到仪器")
-                logger.warning("34970A 未找到仪器")
-        except Exception as e:
-            self._dmm_connected = False
-            self.signal_device_status.emit("34970A", False, f"错误: {e}")
-            logger.error(f"34970A 检测异常: {e}")
+        def _create(): return KEYSIGHT_34970A(gpipID=9, serial_port=port)
+        def _on_ok(inst):
+            inst.set_DMMcls()
+            self._dmm, self._dmm_connected = inst, True
+        self._check_instrument("34970A", _create, _on_ok)
 
-    def _check_it6382(self):
+    def _check_ps(self):
+        """检测 IT6382 电源。"""
         mode = self._config.get("ps_mode", "gpib")
         if mode == "usb":
             port = self._config.get("ps_usb_port", "")
@@ -198,47 +187,46 @@ class InstrumentManager(QObject):
         self.signal_device_status.emit("IT6382", False, f"检测中 ({label})...")
         logger.info(f"检查 IT6382 ({label})...")
 
-        try:
-            gpibid = port if mode == "gpib" else None
-            ps = IT6382(gpibid) if gpibid else IT6382("")
-            if ps.ps_instrument():
-                idn = ps.query_IDN() or "IDN 查询失败"
-                self._ps = ps
-                self._ps_connected = True
-                self.signal_device_status.emit("IT6382", True, idn.strip())
-                logger.info(f"IT6382 连接成功: {idn.strip()}")
-            else:
-                self.signal_device_status.emit("IT6382", False, "未找到仪器")
-                logger.warning("IT6382 未找到仪器")
-        except Exception as e:
-            self._ps_connected = False
-            self.signal_device_status.emit("IT6382", False, f"错误: {e}")
-            logger.error(f"IT6382 检测异常: {e}")
+        gpibid = port if mode == "gpib" else None
+        def _create(): return IT6382(gpibid) if gpibid else IT6382("")
+        def _on_ok(inst):
+            self._ps, self._ps_connected = inst, True
+        self._check_instrument("IT6382", _create, _on_ok)
 
-    def _check_relayboard(self):
+    def _check_relay(self):
+        """检测继电器板。"""
         port = self._config["relay_port"]
         version = self._config["relay_version"]
         self.signal_device_status.emit("Relayboard", False, f"检测中 ({port})...")
         logger.info(f"检查 Relayboard ({port}, v{version})...")
 
+        def _create(): return RELAYBOARD(version, port)
+        def _on_ok(inst):
+            inst.turn_off_relays(range(1, 9))
+            self._relay, self._relay_connected = inst, True
+        self._check_instrument("Relayboard", _create, _on_ok)
+
+    def _check_instrument(self, name: str, factory, on_ok):
+        """通用仪器检测 — 利用 BaseInstrument 多态接口。
+
+        Args:
+            name: 仪器显示名
+            factory: () → BaseInstrument  仪器工厂函数
+            on_ok: (BaseInstrument) → None  连接成功后的回调
+        """
         try:
-            relay = RELAYBOARD(version, port)
-            relay.init_board()
-            if relay.ser and relay.ser.is_open:
-                relay.turn_off_relays(range(1, 9))
-                self._relay = relay
-                self._relay_connected = True
-                self.signal_device_status.emit(
-                    "Relayboard", True, f"{port} (v{version})"
-                )
-                logger.info(f"Relayboard 连接成功: {port}")
+            inst = factory()
+            if inst.connect():
+                idn = inst.get_identity() or "IDN 查询失败"
+                on_ok(inst)
+                self.signal_device_status.emit(name, True, idn.strip())
+                logger.info(f"{name} 连接成功: {idn.strip()}")
             else:
-                self.signal_device_status.emit("Relayboard", False, f"无法打开 {port}")
-                logger.warning(f"Relayboard 连接失败: {port}")
+                self.signal_device_status.emit(name, False, "未找到仪器")
+                logger.warning(f"{name} 未找到仪器")
         except Exception as e:
-            self._relay_connected = False
-            self.signal_device_status.emit("Relayboard", False, f"错误: {e}")
-            logger.error(f"Relayboard 检测异常: {e}")
+            self.signal_device_status.emit(name, False, f"错误: {e}")
+            logger.error(f"{name} 检测异常: {e}")
 
     # ── 手动重连 ──────────────────────────────────────────────────────
 

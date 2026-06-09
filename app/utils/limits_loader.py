@@ -7,10 +7,8 @@
 """
 
 import os
-import json
-import ast
-import re
 from app.utils.constants import LIMITS_CSV
+from app.utils.config_parser import parse_config
 
 
 def load_limits_csv() -> list[dict]:
@@ -39,44 +37,7 @@ def load_limits_csv() -> list[dict]:
             row[header] = parts[i].strip() if i < len(parts) else ""
 
         config_text = parts[8].strip().rstrip(",") if len(parts) > 8 else ""
-        row["config"] = _parse_config(config_text)
+        row["config"] = parse_config(config_text)
         rows.append(row)
 
     return rows
-
-
-def _parse_config(text: str) -> dict:
-    """解析 config 列文本为 dict。"""
-    if not text:
-        return {}
-
-    # JSON
-    try:
-        return json.loads(text)
-    except Exception:
-        pass
-
-    # ('key':'val') -> {'key':'val'} + ast.literal_eval
-    t = text.strip()
-    if t.startswith("(") and t.endswith(")"):
-        t = "{" + t[1:-1] + "}"
-    try:
-        return ast.literal_eval(t)
-    except Exception:
-        pass
-
-    # 手动正则
-    result = {}
-    t2 = text.strip()
-    if t2.startswith("(") and t2.endswith(")"):
-        t2 = t2[1:-1]
-    elif t2.startswith("("):
-        t2 = t2[1:]
-    elif t2.endswith(")"):
-        t2 = t2[:-1]
-
-    if t2:
-        for m in re.findall(r"'([^']+)'\s*:\s*'([^']*)'", t2):
-            result[m[0]] = m[1]
-
-    return result
