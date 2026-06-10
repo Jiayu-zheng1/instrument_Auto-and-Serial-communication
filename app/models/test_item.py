@@ -32,21 +32,21 @@ class TestItem:
         self.ScanSN = None
         self._scan_cache: dict[str, dict[str, float]] = {}
         self._mgr = instrument_manager  # 由调用方注入（向后兼容）
-        self._injected_dmm = dmm       # 直接注入仪器（优先于 _mgr）
+        self._injected_dmm = dmm  # 直接注入仪器（优先于 _mgr）
         self._injected_ps = ps
         self._injected_relay = relay
-        self._dut_port: str | None = "__unset__"  # "__unset__"=自动探测, None=DUT不存在, str=指定串口
+        self._dut_port: str | None = (
+            "__unset__"  # "__unset__"=自动探测, None=DUT不存在, str=指定串口
+        )
         self._bind_measurement_methods()
 
     def _bind_measurement_methods(self):
         """根据 MEASUREMENT_MAP 动态绑定测量方法，替代 74 个手写方法。"""
         for method_name, (mtype, channel) in MEASUREMENT_MAP.items():
             if mtype == "resistance":
-                setattr(self, method_name,
-                        lambda ch=channel: self._get_resistance(ch))
+                setattr(self, method_name, lambda ch=channel: self._get_resistance(ch))
             elif mtype == "voltage":
-                setattr(self, method_name,
-                        lambda ch=channel: self._get_voltage(ch))
+                setattr(self, method_name, lambda ch=channel: self._get_voltage(ch))
 
     def connent_dut(self, timeout=5):
         # DUT 串口明确不存在（多通道模式下 location_id 搜不到）
@@ -363,38 +363,38 @@ class TestItem:
     @property
     def _dmm(self):
         # 直接注入的仪器优先
-        if self._injected_dmm is not None:
-            return self._injected_dmm
+        if self.__dict__.get("_dmm") is not None:
+            return self.__dict__["_dmm"]
         return self._mgr.dmm if self._mgr else None
 
     @property
     def _ps(self):
-        if self._injected_ps is not None:
-            return self._injected_ps
+        if self.__dict__.get("_ps") is not None:
+            return self.__dict__["_ps"]
         return self._mgr.ps if self._mgr else None
 
     @property
     def _relay(self):
-        if self._injected_relay is not None:
-            return self._injected_relay
+        if self.__dict__.get("_relay") is not None:
+            return self.__dict__["_relay"]
         return self._mgr.relay if self._mgr else None
 
     @property
     def _dmm_ok(self) -> bool:
-        if self._injected_dmm is not None:
-            return self._injected_dmm.is_connected
+        if self.__dict__.get("_dmm") is not None:
+            return self.__dict__["_dmm"].is_connected
         return self._mgr.dmm_connected if self._mgr else False
 
     @property
     def _ps_ok(self) -> bool:
-        if self._injected_ps is not None:
-            return self._injected_ps.is_connected
+        if self.__dict__.get("_ps") is not None:
+            return self.__dict__["_ps"].is_connected
         return self._mgr.ps_connected if self._mgr else False
 
     @property
     def _relay_ok(self) -> bool:
-        if self._injected_relay is not None:
-            return self._injected_relay.is_connected
+        if self.__dict__.get("_relay") is not None:
+            return self.__dict__["_relay"].is_connected
         return self._mgr.relay_connected if self._mgr else False
 
     # ═══════════════════════════════════════════════════════════════════════

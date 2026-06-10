@@ -234,13 +234,13 @@ class InstrumentManager(QObject):
         """手动重新连接指定仪器。"""
         if device_name == "34970A":
             self._disconnect_dmm()
-            self._check_34970A()
+            self._check_dmm()
         elif device_name == "IT6382":
             self._disconnect_ps()
-            self._check_it6382()
+            self._check_ps()
         elif device_name == "Relayboard":
             self._disconnect_relay()
-            self._check_relayboard()
+            self._check_relay()
 
     def disconnect_device(self, device_name: str):
         """断开指定仪器并通知 UI。"""
