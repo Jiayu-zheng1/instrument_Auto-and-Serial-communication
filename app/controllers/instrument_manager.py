@@ -134,6 +134,11 @@ class InstrumentManager(QObject):
         return self._relay_connected
 
     @property
+    def is_checking(self) -> bool:
+        """后台线程是否正在检测仪器中。"""
+        return self._checking
+
+    @property
     def all_connected(self) -> bool:
         return self._dmm_connected and self._ps_connected and self._relay_connected
 

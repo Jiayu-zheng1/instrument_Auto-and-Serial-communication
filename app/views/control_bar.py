@@ -91,7 +91,6 @@ class ControlBar(QWidget):
         # SN Input
         self.sn_input = QLineEdit()
         self.sn_input.setPlaceholderText("Scan Serial Number")
-        self.sn_input.setMaxLength(SN_MAX_LENGTH)
         self.sn_input.setFixedWidth(200)
         self.sn_input.setFixedHeight(INPUT_HEIGHT + 4)
         self.sn_input.setFont(self._font(*FONT_BODY))

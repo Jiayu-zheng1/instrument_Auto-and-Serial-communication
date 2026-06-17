@@ -1,5 +1,6 @@
 """Test runner — 单通道测试执行引擎。"""
 
+import time as _time
 from PyQt5.QtCore import pyqtSignal
 from app.utils.logger import get_logger
 
@@ -59,24 +60,35 @@ class TestRunner(BaseTestRunner):
         csv_report = CsvReport(
             self.test_items, self.upper_limit_map, self.lower_limit_map
         )
+        self._test_values: dict[str, str] = {}
 
         for cfg in self.configs:
             try:
-                display = cfg.test_item
-                method = cfg.test_name
-                logger.info(f"Running: {display} → {method}")
+                display = cfg.sub_test_name
+                method = cfg.function
+                self._log(
+                    f'<span style="font-size:15px; font-weight:700;">Start Run [{display}]</span>'
+                )
                 value = self._run_one(display, method, cfg.config)
 
                 if value is not None:
+                    self._test_values[display] = str(value)
                     self._evaluate_result(display, str(value), cfg)
                 else:
-                    self.signal_value.emit(display, "None")
+                    self._test_values[display] = "None"
+                    display_value = "FAILED" if cfg.is_special_limit() else "None"
+                    self.signal_value.emit(display, display_value)
                     self.signal_result.emit(display, "Fail")
                     self.signal_color.emit(display, "Fail")
                     self._test_status = False
 
             except Exception as e:
-                logger.info(f"Error running test item {cfg.test_item}: {e}")
+                logger.info(f"Error running test item {cfg.sub_test_name}: {e}")
+                self._test_values[cfg.sub_test_name] = "Error"
+                display_value = "FAILED" if cfg.is_special_limit() else str(e)
+                self.signal_value.emit(cfg.sub_test_name, display_value)
+                self.signal_result.emit(cfg.sub_test_name, "Fail")
+                self.signal_color.emit(cfg.sub_test_name, "Fail")
                 self._test_status = False
 
             if self._fail_stop and not self._test_status:
@@ -86,10 +98,14 @@ class TestRunner(BaseTestRunner):
             if self.test_unit.FGSN:
                 self.signal_display.emit(self.ScanSN, self.test_unit.FGSN)
 
-        csv_report.set_csv_file(
-            self.test_unit.FGSN,
-            {c.test_item: getattr(self, "_last_value", None) for c in self.configs},
+        # SN 优先级: MLBSN → FGSN → ScanSN → 时间戳
+        csv_sn = (
+            getattr(self.test_unit, "MLBSN", None)
+            or self.test_unit.FGSN
+            or self.ScanSN
+            or _time.strftime("%Y%m%d_%H%M%S")
         )
+        csv_report.set_csv_file(csv_sn, self._test_values)
         self._upload_sfc()
         self.stop()
 
@@ -135,6 +151,10 @@ class TestRunner(BaseTestRunner):
 
     def _load_configs(self):
         self.configs = load_test_configs(self._csv_rows)
-        self.test_items = [c.test_item for c in self.configs]
-        self.lower_limit_map = {c.test_item: c.lower_limit_raw for c in self.configs}
-        self.upper_limit_map = {c.test_item: c.upper_limit_raw for c in self.configs}
+        self.test_items = [c.sub_test_name for c in self.configs]
+        self.lower_limit_map = {
+            c.sub_test_name: c.lower_limit_raw for c in self.configs
+        }
+        self.upper_limit_map = {
+            c.sub_test_name: c.upper_limit_raw for c in self.configs
+        }

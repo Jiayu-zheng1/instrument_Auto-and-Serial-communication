@@ -2,11 +2,13 @@
 
 import csv
 import os
+from app.utils.logger import get_logger
+
+logger = get_logger("MainWindow")
 from PyQt5.QtWidgets import (
     QMainWindow,
     QWidget,
     QVBoxLayout,
-    QSplitter,
     QMessageBox,
     QMenuBar,
     QMenu,
@@ -14,7 +16,7 @@ from PyQt5.QtWidgets import (
     QStackedWidget,
     QTabWidget,
 )
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import QTimer
 from PyQt5.QtGui import QFont, QKeySequence
 from app.views.theme import Colors, FONT_FAMILY, stylesheet
 from app.views.control_bar import ControlBar
@@ -30,8 +32,11 @@ from app.controllers.log_controller import LogController
 from app.controllers.instrument_manager import InstrumentManager
 from app.controllers.dut_monitor import DutMonitor
 from app.utils.constants import LOG_DIR
-from app.utils.limits_loader import load_limits_csv
-from app.utils.config import load_config
+from app.utils.limits_loader import load_test_data
+from app.utils.config import load_config, load_channel_config
+from app.models.instruments.keysight_34970a import KEYSIGHT_34970A
+from app.models.instruments.ps_it6382 import IT6382
+from app.models.instruments.relay_board import RELAYBOARD
 
 
 class MainWindow(QMainWindow):
@@ -40,6 +45,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self._csv_data: list[dict] = []
+        self._csv_headers: list[str] = []  # CSV 表头（供表格动态建列）
         self._runner: TestRunner | None = None
         self._runners: list[ChannelRunner] = []  # 多通道 runners
         self._multi_testing_channels: set[str] = set()  # 正在测试的通道
@@ -100,28 +106,36 @@ class MainWindow(QMainWindow):
         # ── QStackedWidget：单通道(索引0) / 多通道(索引1) ──
         self._stacked = QStackedWidget()
 
-        # 页0: 单通道布局 (QSplitter)
+        # 页0: 单通道布局 (QTabWidget: 测试信息 | Log)
         single_page = QWidget()
         single_layout = QVBoxLayout(single_page)
         single_layout.setContentsMargins(0, 0, 0, 0)
         single_layout.setSpacing(0)
 
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setHandleWidth(1)
-        splitter.setStyleSheet(
-            f"QSplitter::handle {{ background: {Colors.SEPARATOR}; }}"
-        )
+        single_tabs = QTabWidget()
+        single_tabs.setStyleSheet(f"""
+            QTabWidget::pane {{ border: none; }}
+            QTabBar::tab {{
+                padding: 8px 20px;
+                font-size: 13px;
+                font-weight: 600;
+                color: {Colors.TEXT_SECONDARY};
+                border: none;
+                border-bottom: 2px solid transparent;
+            }}
+            QTabBar::tab:selected {{
+                color: {Colors.PRIMARY};
+                border-bottom: 2px solid {Colors.PRIMARY};
+            }}
+        """)
 
         self.test_table = TestTable()
         self.log_panel = LogPanel()
 
-        splitter.addWidget(self.test_table)
-        splitter.addWidget(self.log_panel)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        splitter.setSizes([600, 400])
+        single_tabs.addTab(self.test_table, "测试信息")
+        single_tabs.addTab(self.log_panel, "Log")
 
-        single_layout.addWidget(splitter)
+        single_layout.addWidget(single_tabs)
         self._stacked.addWidget(single_page)
 
         # 页1: 多通道布局 (QTabWidget) — 占位，运行时 rebuild
@@ -204,8 +218,8 @@ class MainWindow(QMainWindow):
 
     def _load_csv(self):
         try:
-            self._csv_data = load_limits_csv()
-            self.test_table.load_config(self._csv_data)
+            self._csv_headers, self._csv_data = load_test_data()
+            self.test_table.load_config(self._csv_data, self._csv_headers)
         except FileNotFoundError:
             QMessageBox.warning(
                 self, "Config Error", "Limits.csv not found in resources/"
@@ -252,12 +266,15 @@ class MainWindow(QMainWindow):
         parts.append("34970A ✓" if mgr.dmm_connected else "34970A ✗")
         parts.append("IT6382 ✓" if mgr.ps_connected else "IT6382 ✗")
         parts.append("Relayboard ✓" if mgr.relay_connected else "Relayboard ✗")
-        self.log_panel.append_log(f"仪器检测完成: {' | '.join(parts)}")
+        logger.info(f"仪器检测完成: {' | '.join(parts)}")
 
     # ── 测试流程 ──────────────────────────────────────────────────────
 
     def _start_test(self, only_channel: str = ""):
         if self._testing:
+            return
+        if self._instr_mgr.is_checking:
+            self.log_panel.append_log("⚠️ 仪器检测中，请稍候…")
             return
         if self._multi_mode:
             self._start_multi_test(only_channel=only_channel)
@@ -315,9 +332,7 @@ class MainWindow(QMainWindow):
             self.log_panel.append_log("手动测试模式")
 
         if self._multi_mode:
-            self.log_panel.append_log(
-                f"多通道模式: {cfg.get('channel_count', 4)} 通道"
-            )
+            self.log_panel.append_log(f"多通道模式: {cfg.get('channel_count', 4)} 通道")
 
     def _on_dut_detected(self, device: str):
         """DUT 串口检测到 → 状态灯亮绿，自动模式才触发测试。"""
@@ -390,9 +405,11 @@ class MainWindow(QMainWindow):
         for i in range(channel_count):
             ch = f"CH{i + 1}"
             ct = ChannelTab(ch)
-            ct.load_config(self._csv_data)
+            ct.load_config(self._csv_data, self._csv_headers)
             ct.set_auto_scroll(cfg.get("auto_scroll_log", True))
-            ct.start_requested.connect(self._start_test)  # 每个通道独立 Start 也走统一入口
+            ct.start_requested.connect(
+                self._start_test
+            )  # 每个通道独立 Start 也走统一入口
             self._channel_tabs[ch] = ct
             self._tab_widget.addTab(ct, ch)
 
@@ -418,15 +435,22 @@ class MainWindow(QMainWindow):
             self.control_bar.start_timer()
             if self._summary_tab:
                 self._summary_tab.reset_all()
-            for card in (self._summary_tab.cards.values() if self._summary_tab else []):
+            for card in self._summary_tab.cards.values() if self._summary_tab else []:
                 card.set_running()
             self.status_header.set_running()
             self.log_panel.append_log("🚀 全局 Start — 所有通道启动")
 
         cfg = load_config()
+        ch_cfg = load_channel_config()
         channel_count = cfg.get("channel_count", 4)
-        loc_ids = cfg.get("channel_location_ids", ["", "", "", ""])
-        instr_bindings = cfg.get("channel_instruments", ["", "", "", ""])
+        loc_ids = ch_cfg.get(
+            "location_ids", cfg.get("channel_location_ids", ["", "", "", ""])
+        )
+        dmm_modes = ch_cfg.get("dmm_modes", ["", "", "", ""])
+        dmm_ports = ch_cfg.get("dmm_ports", ["", "", "", ""])
+        ps_modes = ch_cfg.get("ps_modes", ["", "", "", ""])
+        ps_ports = ch_cfg.get("ps_ports", ["", "", "", ""])
+        relay_ports = ch_cfg.get("relay_ports", ["", "", "", ""])
         fail_stop = cfg.get("fail_stop_test", True)
 
         for i in range(channel_count):
@@ -448,15 +472,61 @@ class MainWindow(QMainWindow):
                 ct.set_running(True)
 
             loc_id = loc_ids[i] if i < len(loc_ids) else ""
-            instr = instr_bindings[i] if i < len(instr_bindings) else ""
-            mgr = self._instr_mgr if instr else None
+
+            # ── 按通道创建独立仪器实例 ──
+            dmm = ps = relay = None
+            _dp = dmm_ports[i] if i < len(dmm_ports) else ""
+            if _dp:
+                dmm = KEYSIGHT_34970A(gpipID=9, serial_port=_dp)
+                try:
+                    if dmm.connect():
+                        dmm.set_DMMcls()
+                        self.log_panel.append_log(
+                            f"  [{ch}] 34970A 连接成功 ({dmm_modes[i] if i < len(dmm_modes) else 'usb'}:{_dp})"
+                        )
+                    else:
+                        self.log_panel.append_log(f"  [{ch}] 34970A 连接失败")
+                except Exception as e:
+                    self.log_panel.append_log(f"  [{ch}] 34970A 连接异常: {e}")
+
+            _pp = ps_ports[i] if i < len(ps_ports) else ""
+            if _pp:
+                _pm = ps_modes[i] if i < len(ps_modes) else "gpib"
+                gpibid = _pp if _pm == "gpib" else ""
+                ps = IT6382(gpibid) if gpibid else IT6382("")
+                try:
+                    if ps.connect():
+                        self.log_panel.append_log(
+                            f"  [{ch}] IT6382 连接成功 ({_pm}:{_pp})"
+                        )
+                    else:
+                        self.log_panel.append_log(f"  [{ch}] IT6382 连接失败")
+                except Exception as e:
+                    self.log_panel.append_log(f"  [{ch}] IT6382 连接异常: {e}")
+
+            _rp = relay_ports[i] if i < len(relay_ports) else ""
+            if _rp:
+                relay = RELAYBOARD("0", _rp)
+                try:
+                    if relay.connect():
+                        relay.turn_off_relays(range(1, 9))
+                        self.log_panel.append_log(
+                            f"  [{ch}] Relayboard 连接成功 ({_rp})"
+                        )
+                    else:
+                        self.log_panel.append_log(f"  [{ch}] Relayboard 连接失败")
+                except Exception as e:
+                    self.log_panel.append_log(f"  [{ch}] Relayboard 连接异常: {e}")
+
             runner = ChannelRunner(
                 channel_id=ch,
                 csv_rows=self._csv_data,
                 location_id=loc_id,
-                instrument_manager=mgr,
                 sn=sn,
                 fail_stop=fail_stop,
+                dmm=dmm,
+                ps=ps,
+                relay=relay,
             )
             runner.signal_value.connect(self._on_channel_value)
             runner.signal_result.connect(self._on_channel_result)

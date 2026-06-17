@@ -10,7 +10,7 @@
 
 import json
 import os
-from app.utils.constants import CONFIG_DIR
+from app.utils.constants import CONFIG_DIR, CHANNEL_CONFIG_PATH
 
 SYSTEM_CONFIG_PATH = os.path.join(CONFIG_DIR, "system_config.json")
 
@@ -51,5 +51,26 @@ def save_config(cfg: dict):
         os.makedirs(CONFIG_DIR, exist_ok=True)
         with open(SYSTEM_CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def load_channel_config() -> dict:
+    """从独立的 JSON 文件加载多通道配置。"""
+    try:
+        if os.path.exists(CHANNEL_CONFIG_PATH):
+            with open(CHANNEL_CONFIG_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def save_channel_config(data: dict):
+    """保存多通道配置到独立 JSON 文件。"""
+    try:
+        os.makedirs(os.path.dirname(CHANNEL_CONFIG_PATH), exist_ok=True)
+        with open(CHANNEL_CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
     except Exception:
         pass

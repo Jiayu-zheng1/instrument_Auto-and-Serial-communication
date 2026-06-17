@@ -23,7 +23,8 @@ class ChannelRunner(BaseTestRunner):
 
     def __init__(self, channel_id: str, csv_rows: list[dict],
                  location_id: str = "",
-                 instrument_manager=None, sn: str = "", fail_stop: bool = True):
+                 instrument_manager=None, sn: str = "", fail_stop: bool = True,
+                 dmm=None, ps=None, relay=None):
         super().__init__()
         self._channel_id = channel_id
         self._csv_rows = csv_rows
@@ -31,7 +32,9 @@ class ChannelRunner(BaseTestRunner):
         self._sn = sn
         self._fail_stop = fail_stop
         self._test_status = True
-        self.test_unit = TestItem(instrument_manager=instrument_manager)
+        self.test_unit = TestItem(
+            instrument_manager=instrument_manager, dmm=dmm, ps=ps, relay=relay,
+        )
         self.configs: list[TestConfig] = []
         self.FGSN: str = ""
         self._log_lines: list[str] = []
@@ -76,21 +79,26 @@ class ChannelRunner(BaseTestRunner):
 
         for cfg in self.configs:
             try:
-                display = cfg.test_item
-                method = cfg.test_name
+                display = cfg.sub_test_name
+                method = cfg.function
                 self._log(f"  [{self._channel_id}] {display} → {method}")
                 value = self._run_one(display, method, cfg.config)
 
                 if value is not None:
                     self._evaluate_result(display, str(value), cfg)
                 else:
-                    self.signal_value.emit(self._channel_id, display, "None")
+                    display_value = "FAILED" if cfg.is_special_limit() else "None"
+                    self.signal_value.emit(self._channel_id, display, display_value)
                     self.signal_result.emit(self._channel_id, display, "Fail")
                     self.signal_color.emit(self._channel_id, display, "Fail")
                     self._test_status = False
 
             except Exception as e:
-                self._log(f"  [{self._channel_id}] 错误: {cfg.test_item} — {e}")
+                self._log(f"  [{self._channel_id}] 错误: {cfg.sub_test_name} — {e}")
+                display_value = "FAILED" if cfg.is_special_limit() else str(e)
+                self.signal_value.emit(self._channel_id, display, display_value)
+                self.signal_result.emit(self._channel_id, display, "Fail")
+                self.signal_color.emit(self._channel_id, display, "Fail")
                 self._test_status = False
 
             if self._fail_stop and not self._test_status:

@@ -159,8 +159,8 @@ class ChannelTab(QWidget):
                 f"font-size: 12px; color: {Colors.DANGER}; font-weight: 600; background: transparent;"
             )
 
-    def load_config(self, csv_rows: list[dict]):
-        self.test_table.load_config(csv_rows)
+    def load_config(self, csv_rows: list[dict], headers: list[str] = None):
+        self.test_table.load_config(csv_rows, headers)
 
     def clear_results(self):
         self.test_table.clear_results()

@@ -9,14 +9,12 @@ import threading
 
 from app.models.instruments.base import BaseInstrument
 
-thLock = threading.Lock()
-
-
 class IT6382(BaseInstrument):
     def __init__(self, gpipID):
         self.gpipID = gpipID
         self.instrument = None
         self._connected = False
+        self._lock = threading.Lock()
 
     # ── BaseInstrument 接口 ──
 
@@ -66,7 +64,7 @@ class IT6382(BaseInstrument):
             return None
 
     def output_on(self, channel, vol, curr):
-        with thLock:
+        with self._lock:
             try:
                 if channel > 3 or channel < 0:
                     return False
@@ -79,7 +77,7 @@ class IT6382(BaseInstrument):
                 return False
 
     def output_off(self, channel):
-        with thLock:
+        with self._lock:
             vol, curr = 0, 0
             try:
                 if channel > 3 or channel < 0:
@@ -93,7 +91,7 @@ class IT6382(BaseInstrument):
                 return False
 
     def read_current(self, channel):
-        with thLock:
+        with self._lock:
             try:
                 if channel > 3 or channel < 0:
                     return "-9999"
@@ -106,7 +104,7 @@ class IT6382(BaseInstrument):
                 return "-9999"
 
     def read_voltage(self, channel):
-        with thLock:
+        with self._lock:
             try:
                 if channel > 3 or channel < 0:
                     return "-9999"
@@ -119,7 +117,7 @@ class IT6382(BaseInstrument):
                 return "-9999"
 
     def output_on_all(self, vol1, vol2, vol3, curr1, curr2, curr3):
-        with thLock:
+        with self._lock:
             try:
                 self.instrument.write(f"APP:VOLT {str(vol1)},{str(vol2)},{str(vol3)}")
                 self.instrument.write(f"APP:CURR {str(curr1)},{str(curr2)},{str(curr3)}")
@@ -130,7 +128,7 @@ class IT6382(BaseInstrument):
                 return False
 
     def output_off_all(self):
-        with thLock:
+        with self._lock:
             vol1, vol2, vol3, curr1, curr2, curr3 = 0, 0, 0, 0, 0, 0
             try:
                 self.instrument.write(f"APP:VOLT {str(vol1)},{str(vol2)},{str(vol3)}")

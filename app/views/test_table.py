@@ -1,4 +1,4 @@
-"""HIG-styled test results table."""
+"""Test results table — 列从 CSV 表头动态生成。"""
 
 from PyQt5.QtWidgets import (
     QTableWidget,
@@ -11,32 +11,30 @@ from PyQt5.QtCore import Qt
 from app.views.theme import Colors, FONT_FAMILY, TABLE_ROW_HEIGHT
 
 
+# ── 表格显示的列与 CSV 表头一致，以下是默认列宽映射 ──
+_DEFAULT_COL_WIDTHS = {
+    "TestName": 160,
+    "Function": 0,  # 内部列，不显示（隐藏）
+    "SubTestName": 250,
+    "LowerLimit": 100,
+    "Value": 350,
+    "UpperLimit": 100,
+    "Unit": 60,
+    "Result": 80,
+}
+
+
 class TestTable(QTableWidget):
-    """Clean, borderless table for test item results."""
-
-    COLUMNS = ["Test Item", "Lower Limit", "Value", "Upper Limit", "Unit", "Result"]
-    COL_WIDTHS = [250, 100, 90, 100, 70, 80]
-
-    # 列索引常量
-    COL_ITEM = 0
-    COL_LOWER = 1
-    COL_VALUE = 2
-    COL_UPPER = 3
-    COL_UNIT = 4
-    COL_RESULT = 5
+    """测试结果表格 — 列顺序和名称从 CSV 表头动态确定。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._auto_scroll = True  # 默认启用，由外部同步实际配置
+        self._auto_scroll = True
+        self._headers: list[str] = []  # 显示的列名（不含隐藏列）
+        self._col_map: dict[str, int] = {}  # 列名 → 列索引
         self._setup()
 
     def _setup(self):
-        self.setColumnCount(len(self.COLUMNS))
-        self.setHorizontalHeaderLabels(self.COLUMNS)
-
-        for i, w in enumerate(self.COL_WIDTHS):
-            self.setColumnWidth(i, w)
-
         self.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -53,7 +51,6 @@ class TestTable(QTableWidget):
         font = QFont(FONT_FAMILY.split(",")[0].strip('"'), 13)
         self.setFont(font)
 
-        # 选中行浅蓝背景
         self.setStyleSheet(f"""
             QTableWidget {{
                 background-color: {Colors.CONTROL_BG};
@@ -80,40 +77,75 @@ class TestTable(QTableWidget):
             }}
         """)
 
-    def load_config(self, csv_rows: list[dict]):
-        """Populate table from parsed CSV rows where Running='Y'."""
+    # ── 公共接口 ──────────────────────────────────────────────────────────
+
+    def load_config(self, csv_rows: list[dict], headers: list[str] = None):
+        """从 CSV 行填充表格，列由 headers 决定（排除隐藏列 Function）。
+
+        headers 不传时回退到旧版固定列逻辑。
+        """
         self.setRowCount(0)
+        if not csv_rows:
+            return
+
+        # ── 确定显示列 ──
+        if headers is None:
+            headers = list(_DEFAULT_COL_WIDTHS.keys())
+        # 排除内部／隐藏列
+        hidden = {"Function"}
+        self._headers = [h for h in headers if h not in hidden]
+        self._col_map = {name: i for i, name in enumerate(self._headers)}
+
+        self.setColumnCount(len(self._headers))
+        self.setHorizontalHeaderLabels(self._headers)
+
+        for i, name in enumerate(self._headers):
+            w = _DEFAULT_COL_WIDTHS.get(name, 100)
+            if w > 0:
+                self.setColumnWidth(i, w)
+
         for row in csv_rows:
             if row.get("Running", "") != "Y":
                 continue
             r = self.rowCount()
             self.insertRow(r)
             self.setRowHeight(r, TABLE_ROW_HEIGHT)
-            self.setItem(r, self.COL_ITEM, self._cell(row.get("TestItem", "")))
-            self.setItem(r, self.COL_LOWER, self._cell(row.get("LowerLimit", "")))
-            self.setItem(r, self.COL_VALUE, self._cell(row.get("value", "")))
-            self.setItem(r, self.COL_UPPER, self._cell(row.get("UpperLimit", "")))
-            self.setItem(r, self.COL_UNIT, self._cell(row.get("Unit", "")))
-            self.setItem(r, self.COL_RESULT, self._cell(row.get("Result", "")))
+            visible = row.get("Visible", "Y") == "Y"  # Y→UI显示limits, N→后台静默
+            for name in self._headers:
+                col = self._col_map[name]
+                # 当 Visible=N 时，LowerLimit / UpperLimit 不显示（Unit 始终显示）
+                if name in ("LowerLimit", "UpperLimit") and not visible:
+                    self.setItem(r, col, self._cell(""))
+                else:
+                    self.setItem(r, col, self._cell(row.get(name, "")))
 
     def clear_results(self):
         for r in range(self.rowCount()):
-            self.setItem(r, self.COL_VALUE, self._cell(""))
-            self.setItem(r, self.COL_RESULT, self._cell(""))
+            for name in ("Value", "Result"):
+                col = self._col_map.get(name)
+                if col is not None:
+                    self.setItem(r, col, self._cell(""))
 
-    def set_value(self, test_item: str, value: str):
-        self._update_column(test_item, self.COL_VALUE, value)
+    def set_value(self, sub_test_name: str, value: str):
+        """按 SubTestName 匹配行，更新 Value 列。"""
+        self._update_column(sub_test_name, "Value", value)
 
-    def set_result(self, test_item: str, result: str):
-        self._update_column(test_item, self.COL_RESULT, result)
+    def set_result(self, sub_test_name: str, result: str):
+        """按 SubTestName 匹配行，更新 Result 列。"""
+        self._update_column(sub_test_name, "Result", result)
 
-    def set_result_color(self, test_item: str, result: str):
+    def set_result_color(self, sub_test_name: str, result: str):
+        """按 SubTestName 匹配行，给 Result 单元格上色。"""
+        col_result = self._col_map.get("Result")
+        if col_result is None:
+            return
+        col_item = self._col_map.get("SubTestName")
+        if col_item is None:
+            return
         for r in range(self.rowCount()):
-            if (
-                self.item(r, self.COL_ITEM)
-                and self.item(r, self.COL_ITEM).text() == test_item
-            ):
-                result_item = self.item(r, self.COL_RESULT)
+            item = self.item(r, col_item)
+            if item and item.text() == sub_test_name:
+                result_item = self.item(r, col_result)
                 if result_item:
                     if result == "Pass":
                         result_item.setBackground(QBrush(QColor(Colors.SUCCESS_BG)))
@@ -124,21 +156,23 @@ class TestTable(QTableWidget):
                 break
 
     def set_auto_scroll(self, enabled: bool):
-        """设置测试表格是否自动滚动到当前行。"""
         self._auto_scroll = enabled
 
-    def _update_column(self, test_item: str, col: int, value: str):
+    # ── 内部 ──────────────────────────────────────────────────────────────
+
+    def _update_column(self, sub_test_name: str, col_name: str, value: str):
+        col = self._col_map.get(col_name)
+        if col is None:
+            return
+        col_item = self._col_map.get("SubTestName")
+        if col_item is None:
+            return
         for r in range(self.rowCount()):
-            if (
-                self.item(r, self.COL_ITEM)
-                and self.item(r, self.COL_ITEM).text() == test_item
-            ):
+            item = self.item(r, col_item)
+            if item and item.text() == sub_test_name:
                 self.setItem(r, col, self._cell(value))
-                # 仅在启用自动滚动时跳转到当前行
                 if self._auto_scroll:
-                    item = self.item(r, self.COL_ITEM)
-                    if item:
-                        self.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+                    self.scrollToItem(item, QAbstractItemView.PositionAtCenter)
                 break
 
     def _cell(self, text: str) -> QTableWidgetItem:

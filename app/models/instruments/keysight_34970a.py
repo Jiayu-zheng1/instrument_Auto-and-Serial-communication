@@ -6,8 +6,6 @@ import pyvisa
 import time
 import threading
 
-thLock = threading.Lock()
-
 import logging
 logger = logging.getLogger("KEYSIGHT_34970A")
 
@@ -25,6 +23,7 @@ class KEYSIGHT_34970A(BaseInstrument):
         self.serial_port = serial_port
         self.instrument = None
         self._connected = False
+        self._lock = threading.Lock()
 
     # ── BaseInstrument 接口 ──
 
@@ -46,7 +45,7 @@ class KEYSIGHT_34970A(BaseInstrument):
         return self._connected
 
     def dmm_instrument(self):
-        with thLock:
+        with self._lock:
             try:
                 port = self.serial_port or str(self.gpipID)
 
@@ -139,7 +138,7 @@ class KEYSIGHT_34970A(BaseInstrument):
             self.instrument = None
 
     def set_RES(self, channel):
-        with thLock:
+        with self._lock:
             try:
                 self.instrument.write(f'CONF:RES (@{channel})')
                 time.sleep(0.05)
@@ -155,7 +154,7 @@ class KEYSIGHT_34970A(BaseInstrument):
                 return None
 
     def set_DCV(self, channel):
-        with thLock:
+        with self._lock:
             try:
                 self.instrument.write(f'CONF:VOLT:DC (@{channel})')
                 time.sleep(0.1)
@@ -171,7 +170,7 @@ class KEYSIGHT_34970A(BaseInstrument):
                 return None
 
     def get_DMMvalue(self):
-        with thLock:
+        with self._lock:
             try:
                 DMMvalue = float(self.instrument.query('READ?'))
                 return str(DMMvalue)
@@ -181,7 +180,7 @@ class KEYSIGHT_34970A(BaseInstrument):
 
     def measure_dcv(self, channel, unit='V'):
         """一键测量直流电压, unit='V'或'mV'"""
-        with thLock:
+        with self._lock:
             try:
                 value = float(self.instrument.query(f'MEAS:VOLT:DC? (@{channel})'))
                 if unit == 'mV':
@@ -192,7 +191,7 @@ class KEYSIGHT_34970A(BaseInstrument):
                 return None
 
     def query_DMMerror(self):
-        with thLock:
+        with self._lock:
             try:
                 error = self.instrument.query('SYSTem:ERRor?')
                 if "No error" in error:
@@ -205,7 +204,7 @@ class KEYSIGHT_34970A(BaseInstrument):
 
     def scan_slot_res(self, channels=None):
         """扫描通道电阻, 每批最多10个通道"""
-        with thLock:
+        with self._lock:
             try:
                 slot_list = [s.strip() for s in channels.split(',')]
                 all_results = {}
@@ -242,7 +241,7 @@ class KEYSIGHT_34970A(BaseInstrument):
 
     def scan_slot_dcv(self, channels=None, range_val='AUTO', resolution='DEFAULT', delay=0, unit='V'):
         """扫描通道直流电压, 每批最多10个通道"""
-        with thLock:
+        with self._lock:
             try:
                 slot_list = [s.strip() for s in channels.split(',')]
                 all_results = {}
@@ -287,7 +286,7 @@ class KEYSIGHT_34970A(BaseInstrument):
 
     def scan_slot_dcv_fast(self, channels=None, range_val='AUTO', resolution='DEFAULT', delay=0):
         """快速扫描通道直流电压 (不重置仪器, 保持上一次配置)"""
-        with thLock:
+        with self._lock:
             try:
                 slot_list = [s.strip() for s in channels.split(',')]
                 all_results = {}
@@ -327,7 +326,7 @@ class KEYSIGHT_34970A(BaseInstrument):
 
     def measure_dcv_single(self, channel, range_val='AUTO', resolution='DEFAULT', unit='V'):
         """单通道直流电压测量"""
-        with thLock:
+        with self._lock:
             try:
                 if range_val == 'AUTO':
                     self.instrument.write(f'CONF:VOLT:DC (@{channel})')
@@ -346,7 +345,7 @@ class KEYSIGHT_34970A(BaseInstrument):
 
     def measure_res(self, channel, unit='Ω'):
         """单通道阻抗测量 (MEAS:RES? 一键完成, 不卡死)。"""
-        with thLock:
+        with self._lock:
             try:
                 value = float(self.instrument.query(f'MEAS:RES? (@{channel})'))
                 return str(value)
@@ -355,7 +354,7 @@ class KEYSIGHT_34970A(BaseInstrument):
                 return '-9999'
 
     def set_DMMcls(self):
-        with thLock:
+        with self._lock:
             try:
                 self.instrument.write('*CLS')
                 return "Clear DMM Errors OK"
@@ -364,7 +363,7 @@ class KEYSIGHT_34970A(BaseInstrument):
                 return None
 
     def set_DMMreset(self):
-        with thLock:
+        with self._lock:
             try:
                 self.instrument.write('*RST')
                 return None
@@ -373,7 +372,7 @@ class KEYSIGHT_34970A(BaseInstrument):
                 return None
 
     def query_IDN(self):
-        with thLock:
+        with self._lock:
             try:
                 idntext = self.instrument.query('*IDN?')
                 return idntext
@@ -382,7 +381,7 @@ class KEYSIGHT_34970A(BaseInstrument):
                 return None
 
     def close(self):
-        with thLock:
+        with self._lock:
             try:
                 if self.instrument:
                     self.instrument.close()

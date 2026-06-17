@@ -44,8 +44,19 @@ class BaseTestRunner(QThread):
 
     def _run_one(self, display: str, method: str, config: dict):
         """统一分发：config 驱动 / 反射调用 TestItem 方法。"""
-        if method == "run_read_cmd" or config:
-            raw_hex, ascii_str, value = self.test_unit.run_read_cmd(method, config)
+        # self._log(f'<span style="font-size:20px; font-weight:700;">Start Run [{method}]</span>')
+        # ── config 驱动路径 ──
+        if method == "Read_ASCII_CMD":
+            raw_hex, ascii_str, value = self.test_unit.Read_ASCII_CMD(method, config)
+        elif method == "Read_HEX_CMD":
+            raw_hex, ascii_str, value = self.test_unit.Read_HEX_CMD(method, config)
+        elif method == "Read_IMPEDANCE":
+            raw_hex, ascii_str, value = self.test_unit.Read_IMPEDANCE(method, config)
+        elif method == "Read_VOLTAGE":
+            raw_hex, ascii_str, value = self.test_unit.Read_VOLTAGE(method, config)
+        elif config:
+            # 旧格式兼容：有 config 但 method 不是标准名
+            raw_hex, ascii_str, value = self.test_unit.Read_ASCII_CMD(method, config)
         elif hasattr(self.test_unit, method):
             test_function = getattr(self.test_unit, method)
             value = test_function()
@@ -62,9 +73,20 @@ class BaseTestRunner(QThread):
         return value
 
     def _evaluate_result(self, test_item: str, value: str, cfg):
-        """判定结果并发射信号。"""
+        """判定结果并发射信号。
+
+        Value列显示规则:
+        - PASSED类型 → 显示 PASSED/FAILED
+        - 有上下限   → 显示正则提取后的原始值
+        - 空limits   → 显示原始值 / None
+        """
         passed, label = cfg.evaluate(value)
-        self._emit_value(test_item, value)
+        # 确定 Value 列显示内容
+        if cfg.is_special_limit() and "PASSED" in {cfg.lower_limit_raw, cfg.upper_limit_raw}:
+            display_value = "PASSED" if passed else "FAILED"
+        else:
+            display_value = value
+        self._emit_value(test_item, display_value)
         self._emit_result(test_item, label)
         self._emit_color(test_item, label)
         if not passed:

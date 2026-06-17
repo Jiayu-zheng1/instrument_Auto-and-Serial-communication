@@ -6,11 +6,19 @@ logger = get_logger("Config")
 
 
 class TestConfig:
-    """Parsed state from a Limits.csv row."""
+    """Parsed state from a Limits.csv row.
 
-    def __init__(self, test_item: str, test_name: str, lower_limit: str, upper_limit: str, config: dict):
-        self.test_item = test_item      # 表格显示名
-        self.test_name = test_name      # TestItem 方法名
+    Fields:
+        test_name:      测试分组名（新增列，如 "Impedance Check"）
+        function:       对应 TestItem 的方法名（原 TestName）
+        sub_test_name:  表格显示名（原 TestItem）
+    """
+
+    def __init__(self, test_name: str, function: str, sub_test_name: str,
+                 lower_limit: str, upper_limit: str, config: dict):
+        self.test_name = test_name                # 测试分组名
+        self.function = function                  # TestItem 方法名
+        self.sub_test_name = sub_test_name        # 表格显示名
         self.lower_limit_raw = lower_limit
         self.upper_limit_raw = upper_limit
         self.config = config
@@ -24,7 +32,7 @@ class TestConfig:
         return _limit_format(self.upper_limit_raw)
 
     def is_special_limit(self):
-        specials = {"No Empty", "Empty", "True", "ON", "PASSED"}
+        specials = {"No Empty", "Empty", "True", "ON", "PASSED", "EQUAL"}
         return self.lower_limit_raw in specials or self.upper_limit_raw in specials
 
     def evaluate(self, value) -> tuple[bool, str]:
@@ -34,13 +42,22 @@ class TestConfig:
         特殊 limit：
         - No Empty：检查 value 非空
         - PASSED/ON/True：检查是否有失败标志（FAILED/False/None）
+        - EQUAL：字符串精确匹配 (忽略大小写)
         数值 limit：统一转 float 做 <= 比较。
+        非数值非特殊的 hex 串 → 字符串精确匹配。
         """
         if self.is_special_limit():
             specials = {self.lower_limit_raw, self.upper_limit_raw}
             if "No Empty" in specials or "Empty" in specials:
                 ok = bool(value)
                 return ok, "Pass" if ok else "Fail"
+
+            # EQUAL → 字符串精确匹配（hex值比较用）
+            if "EQUAL" in specials:
+                expected = self.upper_limit_raw if self.lower_limit_raw == "EQUAL" else self.lower_limit_raw
+                ok = str(value).strip().upper() == str(expected).strip().upper()
+                return ok, "Pass" if ok else "Fail"
+
             # PASSED / ON / True → 检查是否有失败标志
             if value is None:
                 return False, "Fail"
@@ -54,15 +71,28 @@ class TestConfig:
             # 其他情况（包括原始响应、PASSED、True 等）视为 Pass
             return True, "Pass"
 
-        # 数值比较：统一转 float
+        # ── 尝试数值比较 ──
         try:
             val = float(value)
             lo = float(self.lower_limit)
-            hi = float(self.upper_limit)
-            passed = lo <= val <= hi
+            if self.upper_limit_raw.strip() == "":
+                passed = lo <= val
+            else:
+                hi = float(self.upper_limit)
+                passed = lo <= val <= hi
             return passed, "Pass" if passed else "Fail"
         except (ValueError, TypeError):
-            return False, "Fail"
+            pass
+
+        # ── 非数值非特殊 → hex/字符串精确匹配 ──
+        if self.lower_limit_raw.strip():
+            ok = str(value).strip().upper() == self.lower_limit_raw.strip().upper()
+            return ok, "Pass" if ok else "Fail"
+
+        # ── 无 limit → 有返回值即 Pass，None 则 Fail ──
+        if value is not None and str(value).strip() and str(value).strip().upper() != "NONE":
+            return True, "Pass"
+        return False, "Fail"
 
 
 def load_test_configs(csv_rows: list[dict]) -> list[TestConfig]:
@@ -72,11 +102,12 @@ def load_test_configs(csv_rows: list[dict]) -> list[TestConfig]:
         if row.get("Running", "") != "Y":
             continue
         configs.append(TestConfig(
-            test_item=row.get("TestItem", ""),
-            test_name=row.get("TestName", "") or row.get("TestItem", ""),
+            test_name=row.get("TestName", ""),
+            function=row.get("Function", "") or row.get("SubTestName", ""),
+            sub_test_name=row.get("SubTestName", ""),
             lower_limit=row.get("LowerLimit", ""),
             upper_limit=row.get("UpperLimit", ""),
-            config=parse_config(row.get("config", "") or row.get("Config", "")),
+            config=row.get("config", {}),
         ))
     return configs
 

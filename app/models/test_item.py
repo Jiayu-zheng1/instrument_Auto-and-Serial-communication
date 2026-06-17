@@ -7,7 +7,6 @@ from app.utils.logger import get_logger
 
 logger = get_logger("DUT")
 from app.models.device import Device, get_ports
-from app.models.measurement_registry import MEASUREMENT_MAP
 
 verRex = re.compile(r"Application\s\W\d\d\W\S\s(\w*)")
 uvpRex = re.compile(r"Reset Count:\s(\d+)")
@@ -28,6 +27,7 @@ class TestItem:
 
     def __init__(self, instrument_manager=None, *, dmm=None, ps=None, relay=None):
         self.FGSN = None
+        self.MLBSN = None
         self.dut = None
         self.ScanSN = None
         self._scan_cache: dict[str, dict[str, float]] = {}
@@ -38,15 +38,6 @@ class TestItem:
         self._dut_port: str | None = (
             "__unset__"  # "__unset__"=自动探测, None=DUT不存在, str=指定串口
         )
-        self._bind_measurement_methods()
-
-    def _bind_measurement_methods(self):
-        """根据 MEASUREMENT_MAP 动态绑定测量方法，替代 74 个手写方法。"""
-        for method_name, (mtype, channel) in MEASUREMENT_MAP.items():
-            if mtype == "resistance":
-                setattr(self, method_name, lambda ch=channel: self._get_resistance(ch))
-            elif mtype == "voltage":
-                setattr(self, method_name, lambda ch=channel: self._get_voltage(ch))
 
     def connent_dut(self, timeout=5):
         # DUT 串口明确不存在（多通道模式下 location_id 搜不到）
@@ -93,7 +84,7 @@ class TestItem:
                 logger.info("DUT connection Fail")
                 return False
 
-    def run_read_cmd(self, method_name, config):
+    def Read_ASCII_CMD(self, method_name, config):
         """按 config 执行测试，method_name 为 TestName（匹配 TestItem 方法）。
         返回 (raw_hex, ascii_str, result) 元组。
 
@@ -140,7 +131,7 @@ class TestItem:
 
         hex_cmd = config.get("hex_cmd")
         if hex_cmd:
-            delay = float(config.get("delay", 0.05))
+            delay = float(config.get("delay", 0.1))
             raw_hex, data = self.dut.send_hex_cmd(hex_cmd, delay=delay)
             logger.info(f"{method_name} raw response: {data}")
         else:
@@ -160,6 +151,67 @@ class TestItem:
 
         logger.info(f"{method_name} config result: {result}")
         return raw_hex, data, result
+
+    def Read_HEX_CMD(self, method_name, config):
+        """发送 hex 指令，只返回 raw hex 值（不做 ASCII 解码和正则提取）。
+
+        与 Read_ASCII_CMD 的区别：
+        - Read_ASCII_CMD → 返回 ASCII 解码后 + 正则提取的值
+        - Read_HEX_CMD   → 返回原始 hex 字符串，直接用于 contains / regex 判定
+
+        用法:
+            Main.csv: ...,Read_HEX_CMD,Enter-Factory_Mode,Y,('hex_cmd':'055a03003f01010D0A')
+        """
+        if self.dut is None:
+            logger.info(f"{method_name}: DUT 未连接，返回 None")
+            return "", "", None
+
+        hex_cmd = config.get("hex_cmd")
+        if not hex_cmd:
+            logger.info(f"Read_HEX_CMD: config 中无 hex_cmd")
+            return "", "", None
+
+        delay = float(config.get("delay", 0.05))
+        raw_hex, ascii_str = self.dut.send_hex_cmd(hex_cmd, delay=delay)
+        logger.info(f"Read_HEX_CMD raw hex: {raw_hex}")
+
+        result = self._extract_config_value(raw_hex, config)
+        logger.info(f"Read_HEX_CMD config result: {result}")
+        return raw_hex, ascii_str, result
+
+    def Read_IMPEDANCE(self, method_name, config):
+        """通用阻抗测量 — config 指定 channel，从 DMM 直读阻抗值。
+
+        config: {'channel': '101'}  或旧格式 ('channel':'101')
+
+        用法:
+            Main.csv: ...,Read_IMPEDANCE,Measure_Impedance_PP_VBUS_USBC_To_GND,Y,('channel':'101')
+        """
+        channel = config.get("channel", "")
+        if not channel:
+            logger.info(f"Read_IMPEDANCE: config 中无 channel")
+            return "", "", "-9999"
+
+        val = self._get_resistance(str(channel))
+        logger.info(f"Read_IMPEDANCE ch{channel}: {val} Ω")
+        return "", str(val), val
+
+    def Read_VOLTAGE(self, method_name, config):
+        """通用电压测量 — config 指定 channel，从 DMM 直读电压值 (mV)。
+
+        config: {'channel': '101'}  或旧格式 ('channel':'101')
+
+        用法:
+            Main.csv: ...,Read_VOLTAGE,Measure_Voltage_PP_VBUS_USBC_To_GND,Y,('channel':'101')
+        """
+        channel = config.get("channel", "")
+        if not channel:
+            logger.info(f"Read_VOLTAGE: config 中无 channel")
+            return "", "", "-9999"
+
+        val = self._get_voltage(str(channel))
+        logger.info(f"Read_VOLTAGE ch{channel}: {val} mV")
+        return "", str(val), val
 
     def _extract_config_value(self, data, config):
         if data is None:
@@ -215,146 +267,146 @@ class TestItem:
 
     # ── 原有 DUT 方法 ────────────────────────────────────────────────
 
-    def Check_FGSN(self):
-        fgsn = ""
-        cmd = "ds get -s SERIAL_FG"
-        data = self.dut.read_Write(cmd)
-        logger.info(f"Check_FGSN raw response: {data}")
-        if data:
-            value = fgsnRex.search(data)
-            fgsn = value.group(1)
-            if fgsn:
-                self.FGSN = fgsn
-                if self.FGSN == self.ScanSN:
-                    return True
-                else:
-                    return False
-            else:
-                logger.info("FGSN is None")
-                return False
+    # def Check_FGSN(self):
+    #     fgsn = ""
+    #     cmd = "ds get -s SERIAL_FG"
+    #     data = self.dut.read_Write(cmd)
+    #     logger.info(f"Check_FGSN raw response: {data}")
+    #     if data:
+    #         value = fgsnRex.search(data)
+    #         fgsn = value.group(1)
+    #         if fgsn:
+    #             self.FGSN = fgsn
+    #             if self.FGSN == self.ScanSN:
+    #                 return True
+    #             else:
+    #                 return False
+    #         else:
+    #             logger.info("FGSN is None")
+    #             return False
 
-    def MCU_FW_Ver(self):
-        cmd = "sys version"
-        data = self.dut.read_Write(cmd)
-        logger.info(f"MCU_FW_Ver raw response: {data}")
-        if data:
-            value = verRex.search(data)
-            return value.group(1)
-        return None
+    # def MCU_FW_Ver(self):
+    #     cmd = "sys version"
+    #     data = self.dut.read_Write(cmd)
+    #     logger.info(f"MCU_FW_Ver raw response: {data}")
+    #     if data:
+    #         value = verRex.search(data)
+    #         return value.group(1)
+    #     return None
 
-    def Info_UVPCheck(self):
-        cmd = "stylus stats"
-        data = self.dut.read_Write(cmd)
-        logger.info(f"Info_UVPCheck raw response: {data}")
-        if data:
-            uvpver = uvpRex.search(data).group(1)
-            return uvpver
-        return None
+    # def Info_UVPCheck(self):
+    #     cmd = "stylus stats"
+    #     data = self.dut.read_Write(cmd)
+    #     logger.info(f"Info_UVPCheck raw response: {data}")
+    #     if data:
+    #         uvpver = uvpRex.search(data).group(1)
+    #         return uvpver
+    #     return None
 
-    def Info_SOC(self):
-        cmd = "hid -i 0 get 0x21"
-        data1 = self.dut.read_Write(cmd)
-        logger.info(f"Info_SOC raw response: {data1}")
-        if data1:
-            socver = int(socRex.search(data1).group(3), 16)
-            return socver
-        return None
+    # def Info_SOC(self):
+    #     cmd = "hid -i 0 get 0x21"
+    #     data1 = self.dut.read_Write(cmd)
+    #     logger.info(f"Info_SOC raw response: {data1}")
+    #     if data1:
+    #         socver = int(socRex.search(data1).group(3), 16)
+    #         return socver
+    #     return None
 
-    def BT_FW_Ver(self):
-        cmd = "bt version"
-        data = self.dut.read_Write(cmd)
-        logger.info(f"BT_FW_Ver raw response: {data}")
-        if data:
-            N = btRex.search(data).group(1)
-            A = btRex.search(data).group(2)
-            bt_fwver = btRex.search(data).group(3)
-            if N == A == bt_fwver:
-                return f"v{bt_fwver}"
-            else:
-                logger.info(f"BRF:{N},AFU:{A},FW:{bt_fwver}")
-                return None
+    # def BT_FW_Ver(self):
+    #     cmd = "bt version"
+    #     data = self.dut.read_Write(cmd)
+    #     logger.info(f"BT_FW_Ver raw response: {data}")
+    #     if data:
+    #         N = btRex.search(data).group(1)
+    #         A = btRex.search(data).group(2)
+    #         bt_fwver = btRex.search(data).group(3)
+    #         if N == A == bt_fwver:
+    #             return f"v{bt_fwver}"
+    #         else:
+    #             logger.info(f"BRF:{N},AFU:{A},FW:{bt_fwver}")
+    #             return None
 
-    def CheckAquilaID(self):
-        self.dut.read_Write("power stim on")
-        data = self.dut.read_Write("stim rev")
-        logger.info(f"CheckAquilaID raw response: {data}")
-        if data:
-            return AquilaRex.search(data).group(1)
-        else:
-            logger.info("AquilaID is None")
-            return None
+    # def CheckAquilaID(self):
+    #     self.dut.read_Write("power stim on")
+    #     data = self.dut.read_Write("stim rev")
+    #     logger.info(f"CheckAquilaID raw response: {data}")
+    #     if data:
+    #         return AquilaRex.search(data).group(1)
+    #     else:
+    #         logger.info("AquilaID is None")
+    #         return None
 
-    def Check_HWID(self):
-        cmd = "sys banner"
-        data = self.dut.read_Write(cmd)
-        logger.info(f"Check_HWID raw response: {data}")
-        if data:
-            return hwidRex.search(data).group(1)
-        else:
-            logger.info("HWID is None")
-            return None
+    # def Check_HWID(self):
+    #     cmd = "sys banner"
+    #     data = self.dut.read_Write(cmd)
+    #     logger.info(f"Check_HWID raw response: {data}")
+    #     if data:
+    #         return hwidRex.search(data).group(1)
+    #     else:
+    #         logger.info("HWID is None")
+    #         return None
 
-    def Read_Voltage(self):
-        cmd = "pmu status"
-        data = self.dut.read_Write(cmd)
-        logger.info(f"Read_Voltage raw response: {data}")
-        if data:
-            return valtageRex.search(data).group(1)
-        else:
-            logger.info("voltage is None")
-            return None
+    # def Read_Voltage(self):
+    #     cmd = "pmu status"
+    #     data = self.dut.read_Write(cmd)
+    #     logger.info(f"Read_Voltage raw response: {data}")
+    #     if data:
+    #         return valtageRex.search(data).group(1)
+    #     else:
+    #         logger.info("voltage is None")
+    #         return None
 
-    def Read_Temperature(self):
-        cmd = "pmu status"
-        data = self.dut.read_Write(cmd)
-        logger.info(f"Read_Temperature raw response: {data}")
-        if data:
-            return temperatureRex.search(data).group(1)
-        else:
-            logger.info("temperature is None")
-            return None
+    # def Read_Temperature(self):
+    #     cmd = "pmu status"
+    #     data = self.dut.read_Write(cmd)
+    #     logger.info(f"Read_Temperature raw response: {data}")
+    #     if data:
+    #         return temperatureRex.search(data).group(1)
+    #     else:
+    #         logger.info("temperature is None")
+    #         return None
 
-    def Set_Lock(self):
-        self.dut.send_cmd("ds clear -s PMU_CHARGE_ON_PLUG")
-        self.dut.send_cmd("ds get 0")
-        self.dut.read_Write("ds set 0 1")
-        self.dut.send_cmd("sys reset")
-        time.sleep(5)
-        cmd = "ls /dev/cu.*"
-        p = sub.Popen(cmd, shell=True, stdout=sub.PIPE, stderr=sub.PIPE)
-        p.communicate()
-        self.connent_dut()
-        if self.dut:
-            self.dut.read_Write("help")
-            logger.info("Set Lock PASSED")
-            return True
-        else:
-            logger.info("not find DUT")
-            return False
+    # def Set_Lock(self):
+    #     self.dut.send_cmd("ds clear -s PMU_CHARGE_ON_PLUG")
+    #     self.dut.send_cmd("ds get 0")
+    #     self.dut.read_Write("ds set 0 1")
+    #     self.dut.send_cmd("sys reset")
+    #     time.sleep(5)
+    #     cmd = "ls /dev/cu.*"
+    #     p = sub.Popen(cmd, shell=True, stdout=sub.PIPE, stderr=sub.PIPE)
+    #     p.communicate()
+    #     self.connent_dut()
+    #     if self.dut:
+    #         self.dut.read_Write("help")
+    #         logger.info("Set Lock PASSED")
+    #         return True
+    #     else:
+    #         logger.info("not find DUT")
+    #         return False
 
-    def Check_Lock(self):
-        result = self.dut.read_Write("ds get -s LOCK")
-        logger.info(f"Check_Lock raw response: {result}")
-        lockVerMo = lockVerRex.search(result).group(1)
-        logger.info(f"LockVer:{lockVerMo}")
-        if lockVerMo:
-            if lockVerMo == "01":
-                return lockVerMo
-            else:
-                return "00"
-        else:
-            logger.info("LockVer is None")
-            return "None"
+    # def Check_Lock(self):
+    #     result = self.dut.read_Write("ds get -s LOCK")
+    #     logger.info(f"Check_Lock raw response: {result}")
+    #     lockVerMo = lockVerRex.search(result).group(1)
+    #     logger.info(f"LockVer:{lockVerMo}")
+    #     if lockVerMo:
+    #         if lockVerMo == "01":
+    #             return lockVerMo
+    #         else:
+    #             return "00"
+    #     else:
+    #         logger.info("LockVer is None")
+    #         return "None"
 
-    def FinishSetting(self):
-        result = self.dut.read_Write("stylus uvp")
-        logger.info(f"FinishSetting raw response: {result}")
-        if "UVP mode" in result:
-            logger.info("Finish Setting PASSED")
-            return True
-        else:
-            logger.info("Finish Setting FAILED")
-            return False
+    # def FinishSetting(self):
+    #     result = self.dut.read_Write("stylus uvp")
+    #     logger.info(f"FinishSetting raw response: {result}")
+    #     if "UVP mode" in result:
+    #         logger.info("Finish Setting PASSED")
+    #         return True
+    #     else:
+    #         logger.info("Finish Setting FAILED")
+    #         return False
 
     # ═══════════════════════════════════════════════════════════════════════
     #  仪器访问层 — 优先直接注入，回退到 _mgr
@@ -362,39 +414,38 @@ class TestItem:
 
     @property
     def _dmm(self):
-        # 直接注入的仪器优先
-        if self.__dict__.get("_dmm") is not None:
-            return self.__dict__["_dmm"]
+        if self._injected_dmm is not None:
+            return self._injected_dmm
         return self._mgr.dmm if self._mgr else None
 
     @property
     def _ps(self):
-        if self.__dict__.get("_ps") is not None:
-            return self.__dict__["_ps"]
+        if self._injected_ps is not None:
+            return self._injected_ps
         return self._mgr.ps if self._mgr else None
 
     @property
     def _relay(self):
-        if self.__dict__.get("_relay") is not None:
-            return self.__dict__["_relay"]
+        if self._injected_relay is not None:
+            return self._injected_relay
         return self._mgr.relay if self._mgr else None
 
     @property
     def _dmm_ok(self) -> bool:
-        if self.__dict__.get("_dmm") is not None:
-            return self.__dict__["_dmm"].is_connected
+        if self._injected_dmm is not None:
+            return self._injected_dmm.is_connected
         return self._mgr.dmm_connected if self._mgr else False
 
     @property
     def _ps_ok(self) -> bool:
-        if self.__dict__.get("_ps") is not None:
-            return self.__dict__["_ps"].is_connected
+        if self._injected_ps is not None:
+            return self._injected_ps.is_connected
         return self._mgr.ps_connected if self._mgr else False
 
     @property
     def _relay_ok(self) -> bool:
-        if self.__dict__.get("_relay") is not None:
-            return self.__dict__["_relay"].is_connected
+        if self._injected_relay is not None:
+            return self._injected_relay.is_connected
         return self._mgr.relay_connected if self._mgr else False
 
     # ═══════════════════════════════════════════════════════════════════════
@@ -638,3 +689,67 @@ class TestItem:
         except Exception as e:
             logger.info(f"Finished 异常: {e}")
             return False
+
+    # ═══════════════════════════════════════════════════════════════════════
+    #  USB-C 端口就绪检查 (J174)
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def Check_USB_Ready(self, timeout=5.0):
+        """检查 USB-C 串口配对是否就绪（usbmodem*01 + usbmodem*03 同号成对）。
+
+        对标 Lua checkUSBReady：ls /dev/cu.* → 匹配 usbmodem*01 + usbmodem*03 同号配对。
+        累积 3 次稳定就绪后返回 PASSED，超时返回 FAILED。
+
+        Args:
+            timeout: 超时时间 (秒)
+
+        Returns:
+            "PASSED" | "FAILED"
+        """
+        logger.info(f"Check_USB_Ready: 开始检测 USB-C 端口配对 (timeout={timeout}s)")
+        is_ready = 0
+        start_time = time.time()
+        while time.time() - start_time <= float(timeout):
+            result = sub.run(
+                "ls /dev/cu.*",
+                shell=True,
+                capture_output=True,
+                text=True,
+            )
+            output = result.stdout
+
+            # 搜所有 usbmodem*01 → 提取编号，检查同编号 03 是否存在
+            for m in re.finditer(r"usbmodem(\d+)01", output):
+                num = m.group(1)
+                if f"usbmodem{num}03" in output:
+                    is_ready += 1
+                    logger.info(
+                        f"Check_USB_Ready: 配对就绪 usbmodem{num}01/03 ({is_ready}/3)"
+                    )
+                    break  # 有一对就够
+
+            if is_ready >= 3:
+                logger.info(f"Check_USB_Ready PASSED: USB-C 端口配对已稳定")
+                return "PASSED"
+            time.sleep(0.2)
+
+        logger.info(f"Check_USB_Ready FAILED: 超时未检测到 USB-C 端口配对")
+        return "FAILED"
+
+    def Check_R_L_board(self):
+        if self.dut is None:
+            logger.info("DUT 未连接")
+            return "FAILED"
+        hexdata, ASCII_data = self.dut.send_hex_cmd(
+            "055a06001080534944450D0A",
+            delay=0.05,
+        )
+        L_R_Board = hexdata[-2:]
+        if L_R_Board == "01":
+            return "R"
+        elif L_R_Board == "02":
+            return "L"
+        logger.info(
+            f"Check_R_L_board raw response: {ASCII_data}, L_R_Board={L_R_Board}"
+        )
+        return L_R_Board

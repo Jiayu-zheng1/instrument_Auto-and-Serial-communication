@@ -8,9 +8,6 @@ import threading
 
 from app.models.instruments.base import BaseInstrument
 
-thLock = threading.Lock()
-
-
 class RELAYBOARD(BaseInstrument):
     def __init__(self, boardVER, port):
         self.hex_values = {}
@@ -19,6 +16,7 @@ class RELAYBOARD(BaseInstrument):
         self.baudrate = ''
         self.ser = None
         self._connected = False
+        self._lock = threading.Lock()
 
     # ── BaseInstrument 接口 ──
 
@@ -110,7 +108,7 @@ class RELAYBOARD(BaseInstrument):
             return None
 
     def turn_on_relays(self, channels):
-        with thLock:
+        with self._lock:
             for channel in channels:
                 try:
                     self.relay_ON(channel)
@@ -118,7 +116,7 @@ class RELAYBOARD(BaseInstrument):
                     print(f"An error occurred while turning on relay {channel}: {e}")
 
     def turn_off_relays(self, channels):
-        with thLock:
+        with self._lock:
             for channel in channels:
                 try:
                     self.relay_OFF(channel)

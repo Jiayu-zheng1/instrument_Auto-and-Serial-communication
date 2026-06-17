@@ -40,6 +40,8 @@ def get_ports():
     ports = list(
         list_ports.grep(r"/dev/cu\.(usbmodem\w+|pencil\w*|Pencil\w*|Configuration\w*)")
     )
+    # 按端口名排序，确保同名系列中编号最小的排最前（如 usbmodem146331301 优先于 usbmodem146331303）
+    ports.sort(key=lambda p: p.device)
     if ports:
         logger.info(f"get_ports:{ports[0].device}")
     return ports

@@ -30,7 +30,7 @@ from qfluentwidgets import (
     InfoBarPosition,
 )
 from app.utils.logger import get_logger
-from app.utils.config import load_config, save_config
+from app.utils.config import load_config, save_config, load_channel_config, save_channel_config
 from app.views.theme import Colors, FONT_FAMILY, BORDER_RADIUS
 
 logger = get_logger("Settings")
@@ -176,15 +176,127 @@ class _LineEditCard(_SettingCard):
 INSTRUMENT_OPTIONS = ["无仪器", "34970A", "IT6382", "Relayboard"]
 
 
-class _ChannelConfigCard(QFrame):
-    """单通道配置卡片：Location ID + 仪器绑定 + 状态。"""
+INSTRUMENT_MULTI_MODE = {"34970A", "IT6382"}  # 支持 USB + GPIB 双模式的仪器
 
-    # 通知其他通道：仪器已被选 (channel_index, instrument_name)
-    instrument_changed = pyqtSignal(int, str)
+# 通道仪器定义：(键名, 显示名, 是否支持双模式)
+_CHANNEL_INSTRUMENTS = [
+    ("dmm", "34970A", True),
+    ("ps",  "IT6382", True),
+    ("relay", "Relayboard", False),
+]
+
+
+class _InstrConfigRow(QWidget):
+    """单台仪器的连接配置行：模式 Radio + USB ComboBox / GPIB 地址输入。"""
+
+    def __init__(self, label: str, has_mode: bool, parent=None):
+        super().__init__(parent)
+        self._has_mode = has_mode
+        self._mode_radios: dict = {}
+        self._port_combo: ComboBox | None = None
+        self._addr_edit: LineEdit | None = None
+        self._build(label)
+
+    def _build(self, label: str):
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 2, 0, 2)
+        row.setSpacing(6)
+
+        name_lbl = QLabel(label)
+        name_lbl.setFont(_font(12, bold=True))
+        name_lbl.setFixedWidth(48)
+        name_lbl.setStyleSheet(
+            f"color: {Colors.TEXT_PRIMARY}; background: transparent; border: none;"
+        )
+        row.addWidget(name_lbl)
+
+        if self._has_mode:
+            from qfluentwidgets import RadioButton
+            for pt in ["USB", "GPIB"]:
+                rb = RadioButton(pt)
+                rb.setChecked(pt == "USB")
+                rb.toggled.connect(self._on_mode_changed)
+                row.addWidget(rb)
+                self._mode_radios[pt] = rb
+
+        self._port_combo = ComboBox()
+        self._port_combo.setMinimumWidth(180)
+        self._port_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        ports = _list_serial_ports()
+        if ports:
+            self._port_combo.addItems(ports)
+        row.addWidget(self._port_combo, 1)
+
+        self._addr_edit = LineEdit()
+        self._addr_edit.setMinimumWidth(90)
+        self._addr_edit.setPlaceholderText("GPIB 地址")
+        self._addr_edit.setVisible(False)
+        row.addWidget(self._addr_edit, 1)
+
+    def _on_mode_changed(self):
+        mode = self.get_mode()
+        if self._port_combo:
+            self._port_combo.setVisible(mode == "usb")
+        if self._addr_edit:
+            self._addr_edit.setVisible(mode == "gpib")
+
+    def get_mode(self) -> str:
+        if self._mode_radios:
+            for pt, rb in self._mode_radios.items():
+                if rb.isChecked():
+                    return pt.lower()
+        return "usb"
+
+    def set_mode(self, mode: str):
+        mode = mode.upper()
+        rb = self._mode_radios.get(mode)
+        if rb:
+            rb.setChecked(True)
+
+    def get_port(self) -> str:
+        if self.get_mode() == "usb" and self._port_combo:
+            return self._port_combo.currentText().strip()
+        if self._addr_edit:
+            return self._addr_edit.text().strip()
+        return ""
+
+    def set_port(self, val: str):
+        if self.get_mode() == "usb" and self._port_combo:
+            if val:
+                idx = self._port_combo.findText(val)
+                if idx >= 0:
+                    self._port_combo.setCurrentIndex(idx)
+                else:
+                    self._port_combo.insertItem(0, val)
+                    self._port_combo.setCurrentIndex(0)
+        elif self._addr_edit:
+            self._addr_edit.setText(val)
+
+    def set_enabled(self, enabled: bool):
+        if self._port_combo:
+            self._port_combo.setEnabled(enabled)
+        if self._addr_edit:
+            self._addr_edit.setEnabled(enabled)
+        for rb in self._mode_radios.values():
+            rb.setEnabled(enabled)
+
+    def refresh_ports(self, ports: list[str]):
+        if self._port_combo and self._port_combo.isVisible():
+            current = self._port_combo.currentText()
+            self._port_combo.clear()
+            self._port_combo.addItems(ports)
+            idx = self._port_combo.findText(current)
+            if idx >= 0:
+                self._port_combo.setCurrentIndex(idx)
+
+
+class _ChannelConfigCard(QFrame):
+    """单通道配置卡片：Location ID + 三台仪器独立配置 + 状态。"""
 
     def __init__(self, index: int, parent=None):
         super().__init__(parent)
         self._index = index
+        self._instr_rows: dict[str, _InstrConfigRow] = {}
         self._build()
 
     def _build(self):
@@ -200,84 +312,85 @@ class _ChannelConfigCard(QFrame):
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(14, 10, 14, 10)
-        outer.setSpacing(8)
+        outer.setSpacing(6)
 
-        # ── 标题行：通道名 + 状态 ──
+        # ── 标题行 ──
         header = QHBoxLayout()
         header.setSpacing(8)
-
         self._name_lbl = QLabel(f"🔵 通道 {self._index + 1}")
         self._name_lbl.setFont(_font(14, bold=True))
         self._name_lbl.setStyleSheet(
             f"color: {Colors.TEXT_PRIMARY}; background: transparent; border: none;"
         )
         header.addWidget(self._name_lbl)
-
         header.addStretch()
 
         self._status_dot = QLabel("⚫")
         self._status_dot.setFont(_font(10))
-        self._status_dot.setToolTip("通道状态")
         header.addWidget(self._status_dot)
-
         self._status_text = QLabel("未配置")
         self._status_text.setFont(_font(11))
         self._status_text.setStyleSheet(
             f"color: {Colors.TEXT_TERTIARY}; background: transparent; border: none;"
         )
         header.addWidget(self._status_text)
-
         outer.addLayout(header)
 
-        # ── 内容行 ──
-        body = QHBoxLayout()
-        body.setSpacing(12)
-
-        # DUT Location ID
+        # ── DUT Location ID ──
+        dut_row = QHBoxLayout()
+        dut_row.setSpacing(12)
         dut_label = QLabel("DUT")
         dut_label.setFont(_font(12))
         dut_label.setFixedWidth(32)
         dut_label.setStyleSheet(
             f"color: {Colors.TEXT_SECONDARY}; background: transparent; border: none;"
         )
-        body.addWidget(dut_label)
-
+        dut_row.addWidget(dut_label)
         self._loc_edit = LineEdit()
         self._loc_edit.setPlaceholderText(f"Location ID (如 0x1420000{self._index})")
         self._loc_edit.setClearButtonEnabled(True)
         self._loc_edit.setMinimumWidth(180)
-        body.addWidget(self._loc_edit, 1)
+        dut_row.addWidget(self._loc_edit, 1)
+        outer.addLayout(dut_row)
 
-        # 仪器选择
-        instr_label = QLabel("仪器")
-        instr_label.setFont(_font(12))
-        instr_label.setFixedWidth(28)
-        instr_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; background: transparent; border: none;"
-        )
-        body.addWidget(instr_label)
+        # ── 三台仪器独立配置行 ──
+        for key, label, has_mode in _CHANNEL_INSTRUMENTS:
+            row = _InstrConfigRow(label, has_mode)
+            self._instr_rows[key] = row
+            outer.addWidget(row)
 
-        self._instr_combo = ComboBox()
-        self._instr_combo.addItems(INSTRUMENT_OPTIONS)
-        self._instr_combo.setCurrentIndex(0)
-        self._instr_combo.setMinimumWidth(140)
-        self._instr_combo.currentTextChanged.connect(self._on_instrument_changed)
-        body.addWidget(self._instr_combo)
+    # ── 仪器属性访问 ──
 
-        outer.addLayout(body)
+    def _get_row(self, key: str) -> _InstrConfigRow | None:
+        return self._instr_rows.get(key)
 
-    def _on_instrument_changed(self, text: str):
-        self.instrument_changed.emit(self._index, text)
+    def get_instr_mode(self, key: str) -> str:
+        row = self._get_row(key)
+        return row.get_mode() if row else "usb"
 
-    # ── 属性 ──
+    def set_instr_mode(self, key: str, mode: str):
+        row = self._get_row(key)
+        if row:
+            row.set_mode(mode)
+
+    def get_instr_port(self, key: str) -> str:
+        row = self._get_row(key)
+        return row.get_port() if row else ""
+
+    def set_instr_port(self, key: str, val: str):
+        row = self._get_row(key)
+        if row:
+            row.set_port(val)
+
+    @property
+    def instr_rows(self) -> dict:
+        return self._instr_rows
+
+    # ── 公共属性 ──
 
     @property
     def loc_edit(self) -> LineEdit:
         return self._loc_edit
-
-    @property
-    def instr_combo(self) -> ComboBox:
-        return self._instr_combo
 
     @property
     def index(self) -> int:
@@ -288,14 +401,6 @@ class _ChannelConfigCard(QFrame):
 
     def set_location_id(self, val: str):
         self._loc_edit.setText(val)
-
-    def get_instrument(self) -> str:
-        return self._instr_combo.currentText()
-
-    def set_instrument(self, val: str):
-        idx = self._instr_combo.findText(val)
-        if idx >= 0:
-            self._instr_combo.setCurrentIndex(idx)
 
     def set_status(self, connected: bool):
         if connected:
@@ -434,7 +539,32 @@ class _InstrumentRow(QFrame):
         if self._connected:
             self.signal_disconnect.emit(self._device_id)
         else:
+            # 连接前先同步当前选择的模式+端口到 InstrumentManager，
+            # 否则 reconnect_device() 会读取已过时的旧配置
+            self._sync_config_before_connect()
             self.signal_connect.emit(self._device_id)
+
+    def _sync_config_before_connect(self):
+        """将当前模式+端口写入 InstrumentManager，确保重连使用最新选择。"""
+        from app.controllers.instrument_manager import InstrumentManager
+
+        mgr = InstrumentManager.instance()
+        mode = self.get_mode()
+        port = self.get_port_value()
+
+        if self._device_id == "34970A":
+            mgr.update_config(
+                dmm_mode=mode,
+                dmm_port=port if mode == "usb" else mgr.config.get("dmm_port", ""),
+                dmm_gpib=port if mode == "gpib" else mgr.config.get("dmm_gpib", "11"),
+            )
+        elif self._device_id == "IT6382":
+            mgr.update_config(
+                ps_mode=mode,
+                ps_usb_port=port if mode == "usb" else mgr.config.get("ps_usb_port", ""),
+                ps_port=port if mode == "gpib" else mgr.config.get("ps_port", "8"),
+            )
+        # Relayboard 只有 USB，无需同步模式
 
     def get_mode(self) -> str:
         if self._mode_radios:
@@ -851,18 +981,30 @@ class SettingsDialog(QDialog):
         self._channel_count_card.combo.currentTextChanged.connect(self._on_channel_count_changed)
         self._add_card(self._channel_count_card)
 
-        # 每个通道的配置卡片（Location ID + 仪器选择）
+        # 每个通道的配置卡片（Location ID + 三台仪器独立配置）
         self._channel_cards: list[_ChannelConfigCard] = []
-        channel_ids = self._system_config.get("channel_location_ids", ["", "", "", ""])
-        channel_instrs = self._system_config.get("channel_instruments", ["", "", "", ""])
+        _ch_cfg = load_channel_config()
+        channel_ids = _ch_cfg.get("location_ids", self._system_config.get("channel_location_ids", ["", "", "", ""]))
+        # 每台仪器独立存储：mode + port
+        dmm_modes = _ch_cfg.get("dmm_modes", self._system_config.get("channel_dmm_modes", ["", "", "", ""]))
+        dmm_ports = _ch_cfg.get("dmm_ports", self._system_config.get("channel_dmm_ports", ["", "", "", ""]))
+        ps_modes = _ch_cfg.get("ps_modes", self._system_config.get("channel_ps_modes", ["", "", "", ""]))
+        ps_ports = _ch_cfg.get("ps_ports", self._system_config.get("channel_ps_ports", ["", "", "", ""]))
+        relay_ports = _ch_cfg.get("relay_ports", self._system_config.get("channel_relay_ports", ["", "", "", ""]))
         for i in range(8):
             card = _ChannelConfigCard(i)
             if i < len(channel_ids):
                 card.set_location_id(channel_ids[i])
-            if i < len(channel_instrs) and channel_instrs[i]:
-                card.set_instrument(channel_instrs[i])
-            # 仪器互斥：同一仪器只能选一次
-            card.instrument_changed.connect(self._on_channel_instrument_changed)
+            if i < len(dmm_modes) and dmm_modes[i]:
+                card.set_instr_mode("dmm", dmm_modes[i])
+            if i < len(dmm_ports) and dmm_ports[i]:
+                card.set_instr_port("dmm", dmm_ports[i])
+            if i < len(ps_modes) and ps_modes[i]:
+                card.set_instr_mode("ps", ps_modes[i])
+            if i < len(ps_ports) and ps_ports[i]:
+                card.set_instr_port("ps", ps_ports[i])
+            if i < len(relay_ports) and relay_ports[i]:
+                card.set_instr_port("relay", relay_ports[i])
             self._add_card(card)
             self._channel_cards.append(card)
 
@@ -947,6 +1089,10 @@ class SettingsDialog(QDialog):
                 idx = row._port_combo.findText(current)
                 if idx >= 0:
                     row._port_combo.setCurrentIndex(idx)
+        # 刷新通道卡片的串口列表
+        for card in self._channel_cards:
+            for row in card.instr_rows.values():
+                row.refresh_ports(ports)
 
     def _on_show_dut_list(self):
         """展示当前可用的 DUT 设备及其 Location ID。"""
@@ -975,15 +1121,6 @@ class SettingsDialog(QDialog):
 
     def _on_channel_count_changed(self, text: str):
         self._sync_channel_loc_visibility()
-
-    def _on_channel_instrument_changed(self, channel_index: int, instrument: str):
-        """仪器互斥：同一仪器不能同时分配给多个通道。"""
-        if instrument == "无仪器":
-            return
-        # 把其他通道的同一仪器清除
-        for i, card in enumerate(self._channel_cards):
-            if i != channel_index and card.get_instrument() == instrument:
-                card.set_instrument("无仪器")
 
     def _sync_channel_loc_visibility(self):
         """根据 multi_channel_mode 和 channel_count 显示/隐藏通道配置卡片。"""
@@ -1049,7 +1186,8 @@ class SettingsDialog(QDialog):
         self._channel_count_card.combo.setEnabled(enabled)
         for card in self._channel_cards:
             card.loc_edit.setEnabled(enabled)
-            card.instr_combo.setEnabled(enabled)
+            for row in card.instr_rows.values():
+                row.set_enabled(enabled)
         # 通用设置
         self._fail_stop_card.switch.setEnabled(enabled)
         # 系统设置
@@ -1108,9 +1246,27 @@ class SettingsDialog(QDialog):
         self._system_config["multi_channel_mode"] = self._multi_channel_card.switch.isChecked()
         self._system_config["channel_count"] = int(self._channel_count_card.combo.currentText())
         loc_ids = [c.get_location_id() for c in self._channel_cards[:8]]
-        instr_ids = [c.get_instrument() if c.get_instrument() != "无仪器" else "" for c in self._channel_cards[:8]]
+        dmm_modes = [c.get_instr_mode("dmm") for c in self._channel_cards[:8]]
+        dmm_ports = [c.get_instr_port("dmm") for c in self._channel_cards[:8]]
+        ps_modes = [c.get_instr_mode("ps") for c in self._channel_cards[:8]]
+        ps_ports = [c.get_instr_port("ps") for c in self._channel_cards[:8]]
+        relay_ports = [c.get_instr_port("relay") for c in self._channel_cards[:8]]
+        # 保存到独立 JSON
+        save_channel_config({
+            "location_ids": loc_ids,
+            "dmm_modes": dmm_modes,
+            "dmm_ports": dmm_ports,
+            "ps_modes": ps_modes,
+            "ps_ports": ps_ports,
+            "relay_ports": relay_ports,
+        })
+        # 同时保留旧键向后兼容
         self._system_config["channel_location_ids"] = loc_ids
-        self._system_config["channel_instruments"] = instr_ids
+        self._system_config["channel_dmm_modes"] = dmm_modes
+        self._system_config["channel_dmm_ports"] = dmm_ports
+        self._system_config["channel_ps_modes"] = ps_modes
+        self._system_config["channel_ps_ports"] = ps_ports
+        self._system_config["channel_relay_ports"] = relay_ports
         self._system_config["fail_stop_test"] = self._fail_stop_card.switch.isChecked()
         self._system_config["auto_scroll_log"] = (
             self._auto_scroll_card.switch.isChecked()

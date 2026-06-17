@@ -1,12 +1,12 @@
-"""HIG-styled log output panel."""
+"""实时日志面板 — QTextEdit + HTML + macOS Cmd+C 可用。"""
 from PyQt5.QtWidgets import QTextEdit, QWidget, QVBoxLayout, QLabel
-from PyQt5.QtGui import QFont, QColor, QTextCursor
+from PyQt5.QtGui import QFont, QTextCursor, QKeySequence
 from PyQt5.QtCore import Qt
-from app.views.theme import Colors, FONT_MONO, FONT_CAPTION_1, BORDER_RADIUS, MARGIN
+from app.views.theme import Colors, FONT_MONO, BORDER_RADIUS, MARGIN
 
 
 class LogPanel(QWidget):
-    """White-background real-time log viewer — HIG clean style."""
+    """实时日志面板。QTextEdit 支持 HTML 渲染 + 原生选中复制。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -17,16 +17,13 @@ class LogPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        # Header
         header = QLabel("Log")
         header.setFont(QFont(FONT_MONO.split(",")[0].strip('"'), 11))
         header.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; padding: 0 {MARGIN}px;")
         layout.addWidget(header)
 
-        # Log output — white background
-        self._auto_scroll = True  # 默认启用，由外部同步实际配置
-        self.text_edit = QTextEdit()
-        self.text_edit.setReadOnly(True)
+        self._auto_scroll = True
+        self.text_edit = _CopyableTextEdit()
         self.text_edit.setFont(QFont(FONT_MONO.split(",")[0].strip('"'), 11))
         self.text_edit.setStyleSheet(f"""
             QTextEdit {{
@@ -38,28 +35,10 @@ class LogPanel(QWidget):
                 selection-background-color: {Colors.PRIMARY};
                 selection-color: white;
             }}
-            QScrollBar:vertical {{
-                background: transparent;
-                width: 6px;
-                margin: 0;
-            }}
-            QScrollBar::handle:vertical {{
-                background: {Colors.TEXT_TERTIARY};
-                border-radius: 3px;
-                min-height: 30px;
-            }}
-            QScrollBar::handle:vertical:hover {{
-                background: {Colors.TEXT_SECONDARY};
-            }}
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical {{
-                height: 0;
-            }}
         """)
         layout.addWidget(self.text_edit)
 
     def set_auto_scroll(self, enabled: bool):
-        """设置是否自动滚动到底部。"""
         self._auto_scroll = enabled
 
     def append_log(self, message: str):
@@ -69,3 +48,44 @@ class LogPanel(QWidget):
 
     def clear_log(self):
         self.text_edit.clear()
+
+
+class _CopyableTextEdit(QTextEdit):
+    """不使用 setReadOnly(True)（它会禁用 macOS Cmd+C），改为手动阻止编辑。
+
+    macOS 上当 setReadOnly=True 时，AppKit 认定此控件不需要编辑快捷键，
+    Cmd+C 在原生层就被吞掉了，无法通过 keyPressEvent 拦截。
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # 不使用 setReadOnly(True)
+        # 仅阻止文本插入 + 粘贴
+        self.setAcceptRichText(False)
+
+    def keyPressEvent(self, event):
+        # 允许复制（Cmd+C / Ctrl+C）→ 调用全局 copy 槽
+        if (event.modifiers() in (Qt.ControlModifier, Qt.MetaModifier)
+                and event.key() == Qt.Key_C) \
+                or event.matches(QKeySequence.Copy):
+            self.copy()
+            return
+        # 允许全选
+        if (event.modifiers() in (Qt.ControlModifier, Qt.MetaModifier)
+                and event.key() == Qt.Key_A):
+            self.selectAll()
+            return
+        # 允许导航键 / Shift+↑↓ 选择
+        if event.key() in (
+            Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down,
+            Qt.Key_PageUp, Qt.Key_PageDown, Qt.Key_Home, Qt.Key_End,
+        ):
+            super().keyPressEvent(event)
+            return
+        # 拦截所有会导致文本写入的按键
+        if event.text() and not event.modifiers():
+            return
+        super().keyPressEvent(event)
+
+    def insertFromMimeData(self, source):
+        pass  # 阻止粘贴（Cmd+V / Ctrl+V）
