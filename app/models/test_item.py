@@ -730,11 +730,11 @@ class TestItem:
 
             if is_ready >= 3:
                 logger.info(f"Check_USB_Ready PASSED: USB-C 端口配对已稳定")
-                return "PASSED"
+                return True
             time.sleep(0.2)
 
         logger.info(f"Check_USB_Ready FAILED: 超时未检测到 USB-C 端口配对")
-        return "FAILED"
+        return False
 
     def Check_R_L_board(self):
         if self.dut is None:

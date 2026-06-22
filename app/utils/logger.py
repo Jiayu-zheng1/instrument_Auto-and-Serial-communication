@@ -164,7 +164,7 @@ def ensure_module(module_name: str):
         format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<5} | {message}",
         level="DEBUG",
         rotation="00:00",           # 每天午夜轮转
-        retention=2,                 # 保留最近2个轮转文件（当天+昨天），更多由 worker 搬走
+        retention=90,                # 保留最近90个轮转文件，给 worker 充足时间搬运
         compression=None,
         encoding="utf-8",
         enqueue=True,

@@ -32,6 +32,8 @@ class TestTable(QTableWidget):
         self._auto_scroll = True
         self._headers: list[str] = []  # 显示的列名（不含隐藏列）
         self._col_map: dict[str, int] = {}  # 列名 → 列索引
+        self._last_match: dict[str, int] = {}  # SubTestName → 上次匹配行号
+        self._current_row: int = -1              # 当前测试行号 (set_value 记录, set_result/color 复用)
         self._setup()
 
     def _setup(self):
@@ -85,6 +87,7 @@ class TestTable(QTableWidget):
         headers 不传时回退到旧版固定列逻辑。
         """
         self.setRowCount(0)
+        self._last_match.clear()
         if not csv_rows:
             return
 
@@ -120,6 +123,7 @@ class TestTable(QTableWidget):
                     self.setItem(r, col, self._cell(row.get(name, "")))
 
     def clear_results(self):
+        self._last_match.clear()
         for r in range(self.rowCount()):
             for name in ("Value", "Result"):
                 col = self._col_map.get(name)
@@ -127,53 +131,51 @@ class TestTable(QTableWidget):
                     self.setItem(r, col, self._cell(""))
 
     def set_value(self, sub_test_name: str, value: str):
-        """按 SubTestName 匹配行，更新 Value 列。"""
-        self._update_column(sub_test_name, "Value", value)
+        """按 SubTestName + _last_match 定位行，记录到 _current_row 供 set_result/color 复用。"""
+        col_item = self._col_map.get("SubTestName")
+        col_val = self._col_map.get("Value")
+        if col_item is None or col_val is None:
+            return
+        start = self._last_match.get(sub_test_name, 0)
+        for r in range(start, self.rowCount()):
+            item = self.item(r, col_item)
+            if item and item.text() == sub_test_name:
+                self._last_match[sub_test_name] = r + 1
+                self._current_row = r
+                self.setItem(r, col_val, self._cell(value))
+                if self._auto_scroll:
+                    self.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+                return
 
     def set_result(self, sub_test_name: str, result: str):
-        """按 SubTestName 匹配行，更新 Result 列。"""
-        self._update_column(sub_test_name, "Result", result)
+        """复用 _current_row，直接更新 Result 列。"""
+        self._update_current_row("Result", result)
 
     def set_result_color(self, sub_test_name: str, result: str):
-        """按 SubTestName 匹配行，给 Result 单元格上色。"""
+        """复用 _current_row，给 Result 单元格上色。"""
+        if self._current_row < 0:
+            return
         col_result = self._col_map.get("Result")
         if col_result is None:
             return
-        col_item = self._col_map.get("SubTestName")
-        if col_item is None:
+        result_item = self.item(self._current_row, col_result)
+        if result_item:
+            if result == "Pass":
+                result_item.setBackground(QBrush(QColor(Colors.SUCCESS_BG)))
+                result_item.setForeground(QBrush(QColor(Colors.SUCCESS)))
+            else:
+                result_item.setBackground(QBrush(QColor(Colors.DANGER_BG)))
+                result_item.setForeground(QBrush(QColor(Colors.DANGER)))
+
+    def _update_current_row(self, col_name: str, value: str):
+        if self._current_row < 0:
             return
-        for r in range(self.rowCount()):
-            item = self.item(r, col_item)
-            if item and item.text() == sub_test_name:
-                result_item = self.item(r, col_result)
-                if result_item:
-                    if result == "Pass":
-                        result_item.setBackground(QBrush(QColor(Colors.SUCCESS_BG)))
-                        result_item.setForeground(QBrush(QColor(Colors.SUCCESS)))
-                    else:
-                        result_item.setBackground(QBrush(QColor(Colors.DANGER_BG)))
-                        result_item.setForeground(QBrush(QColor(Colors.DANGER)))
-                break
+        col = self._col_map.get(col_name)
+        if col is not None:
+            self.setItem(self._current_row, col, self._cell(value))
 
     def set_auto_scroll(self, enabled: bool):
         self._auto_scroll = enabled
-
-    # ── 内部 ──────────────────────────────────────────────────────────────
-
-    def _update_column(self, sub_test_name: str, col_name: str, value: str):
-        col = self._col_map.get(col_name)
-        if col is None:
-            return
-        col_item = self._col_map.get("SubTestName")
-        if col_item is None:
-            return
-        for r in range(self.rowCount()):
-            item = self.item(r, col_item)
-            if item and item.text() == sub_test_name:
-                self.setItem(r, col, self._cell(value))
-                if self._auto_scroll:
-                    self.scrollToItem(item, QAbstractItemView.PositionAtCenter)
-                break
 
     def _cell(self, text: str) -> QTableWidgetItem:
         item = QTableWidgetItem(str(text))

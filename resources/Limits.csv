@@ -3,7 +3,9 @@ Info_CheckDUT,PASSED,PASSED,,Y
 Read_MLB_SN,PASSED,PASSED,,Y
 Check_USB_Ready,PASSED,PASSED,,Y
 Enter-Factory_Mode,055b03003f0100,,,Y
-Check_R_L_board,,,,Y
+Set-Fuel_Gauge_Service_Disable,,,,Y
+Set-Charger_Service_Disable,,,,Y
+Set-Turn_Off_APP_LED,,,,Y
 Enable-HWID,PASSED,PASSED,,Y
 Read_NVM_5100,,,,Y
 Check_Fuse,,,,Y
