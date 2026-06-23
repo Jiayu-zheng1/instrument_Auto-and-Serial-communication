@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QFont, QColor, QBrush
 from PyQt5.QtCore import Qt
 from app.views.theme import Colors, FONT_FAMILY, TABLE_ROW_HEIGHT
+from app.models.test_plan import TestStep
 
 
 # ── 表格显示的列与 CSV 表头一致，以下是默认列宽映射 ──
@@ -81,8 +82,8 @@ class TestTable(QTableWidget):
 
     # ── 公共接口 ──────────────────────────────────────────────────────────
 
-    def load_config(self, csv_rows: list[dict], headers: list[str] = None):
-        """从 CSV 行填充表格，列由 headers 决定（排除隐藏列 Function）。
+    def load_config(self, csv_rows: list[TestStep], headers: list[str] = None):
+        """从 TestStep 列表填充表格，列由 headers 决定（排除隐藏列 Function）。
 
         headers 不传时回退到旧版固定列逻辑。
         """

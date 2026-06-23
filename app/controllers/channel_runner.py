@@ -7,6 +7,7 @@ logger = get_logger("ChannelRunner")
 from app.controllers.base_runner import BaseTestRunner
 from app.models.test_item import TestItem
 from app.models.test_config import TestConfig, load_test_configs
+from app.models.test_plan import TestStep
 from app.models.device import find_port_by_location
 from app.utils.config import load_config
 
@@ -21,7 +22,7 @@ class ChannelRunner(BaseTestRunner):
     signal_log = pyqtSignal(str, str)
     signal_display = pyqtSignal(str, str, str)
 
-    def __init__(self, channel_id: str, csv_rows: list[dict],
+    def __init__(self, channel_id: str, csv_rows: list[TestStep],
                  location_id: str = "",
                  instrument_manager=None, sn: str = "", fail_stop: bool = True,
                  dmm=None, ps=None, relay=None):
@@ -116,6 +117,13 @@ class ChannelRunner(BaseTestRunner):
 
     def _load_configs(self):
         self.configs = load_test_configs(self._csv_rows)
+        self.test_items = [c.sub_test_name for c in self.configs]
+        self.lower_limit_map = {
+            c.sub_test_name: c.lower_limit_raw for c in self.configs
+        }
+        self.upper_limit_map = {
+            c.sub_test_name: c.upper_limit_raw for c in self.configs
+        }
 
     def get_log_lines(self) -> list[str]:
         return list(self._log_lines)

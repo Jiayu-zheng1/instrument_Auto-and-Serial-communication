@@ -1,6 +1,7 @@
 """Test configuration model — CSV row parsing and validation."""
 from app.utils.logger import get_logger
 from app.utils.config_parser import parse_config
+from app.models.test_plan import TestStep
 
 logger = get_logger("Config")
 
@@ -95,8 +96,8 @@ class TestConfig:
         return False, "Fail"
 
 
-def load_test_configs(csv_rows: list[dict]) -> list[TestConfig]:
-    """Parse CSV rows into TestConfig list, filtering Running='Y'."""
+def load_test_configs(csv_rows: list[TestStep]) -> list[TestConfig]:
+    """Parse TestStep list into TestConfig list, filtering Running='Y'."""
     configs = []
     for row in csv_rows:
         if row.get("Running", "") != "Y":

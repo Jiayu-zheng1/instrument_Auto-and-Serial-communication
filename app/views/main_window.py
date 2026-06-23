@@ -37,6 +37,7 @@ from app.utils.config import load_config, load_channel_config
 from app.models.instruments.keysight_34970a import KEYSIGHT_34970A
 from app.models.instruments.ps_it6382 import IT6382
 from app.models.instruments.relay_board import RELAYBOARD
+from app.models.test_plan import TestPlan
 
 
 class MainWindow(QMainWindow):
@@ -44,8 +45,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self._csv_data: list[dict] = []
-        self._csv_headers: list[str] = []  # CSV 表头（供表格动态建列）
+        self._test_plan: TestPlan = TestPlan()
         self._runner: TestRunner | None = None
         self._runners: list[ChannelRunner] = []  # 多通道 runners
         self._multi_testing_channels: set[str] = set()  # 正在测试的通道
@@ -218,8 +218,8 @@ class MainWindow(QMainWindow):
 
     def _load_csv(self):
         try:
-            self._csv_headers, self._csv_data = load_test_data()
-            self.test_table.load_config(self._csv_data, self._csv_headers)
+            self._test_plan = load_test_data()
+            self.test_table.load_config(self._test_plan.steps, self._test_plan.headers)
         except FileNotFoundError:
             QMessageBox.warning(
                 self, "Config Error", "Limits.csv not found in resources/"
@@ -291,7 +291,7 @@ class MainWindow(QMainWindow):
         self.control_bar.start_timer()
 
         self._runner = TestRunner(
-            self._csv_data, self._log_ctrl, instrument_manager=self._instr_mgr
+            self._test_plan.steps, self._log_ctrl, instrument_manager=self._instr_mgr
         )
         self._runner.ScanSN = sn
         self._runner.signal_value.connect(self.test_table.set_value)
@@ -405,7 +405,7 @@ class MainWindow(QMainWindow):
         for i in range(channel_count):
             ch = f"CH{i + 1}"
             ct = ChannelTab(ch)
-            ct.load_config(self._csv_data, self._csv_headers)
+            ct.load_config(self._test_plan.steps, self._test_plan.headers)
             ct.set_auto_scroll(cfg.get("auto_scroll_log", True))
             ct.start_requested.connect(
                 self._start_test
@@ -520,7 +520,7 @@ class MainWindow(QMainWindow):
 
             runner = ChannelRunner(
                 channel_id=ch,
-                csv_rows=self._csv_data,
+                csv_rows=self._test_plan.steps,
                 location_id=loc_id,
                 sn=sn,
                 fail_stop=fail_stop,
@@ -607,7 +607,12 @@ class MainWindow(QMainWindow):
         for runner in self._runners:
             if runner.isRunning():
                 runner.test_unit.close_dut()
-                runner.quit()
+                runner.running = False  # 标记停止，run() 循环下次迭代退出
+                runner.quit()           # 兼容 event-loop 线程
+                runner.wait(3000)       # 最多等3秒
+                if runner.isRunning():
+                    runner.terminate()  # 兜底强制终止
+                    runner.wait(1000)
         self._dut_monitor.stop_monitor()
         self._instr_mgr.shutdown()
         event.accept()

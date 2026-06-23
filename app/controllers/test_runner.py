@@ -9,6 +9,7 @@ from app.controllers.base_runner import BaseTestRunner
 from app.models.test_item import TestItem
 from app.models.test_config import TestConfig, load_test_configs
 from app.models.sfc_connector import SFCConnector
+from app.models.test_plan import TestStep
 from app.utils.csv_handler import CsvReport
 from app.utils.config import load_config
 
@@ -23,7 +24,7 @@ class TestRunner(BaseTestRunner):
     signal_stop = pyqtSignal()
     signal_display = pyqtSignal(str, str)
 
-    def __init__(self, csv_rows: list[dict], log_controller, instrument_manager=None):
+    def __init__(self, csv_rows: list[TestStep], log_controller, instrument_manager=None):
         super().__init__()
         self._csv_rows = csv_rows
         self._log_controller = log_controller

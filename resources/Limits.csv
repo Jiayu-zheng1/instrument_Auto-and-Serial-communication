@@ -9,8 +9,8 @@ Set-Turn_Off_APP_LED,,,,Y
 Enable-HWID,PASSED,PASSED,,Y
 Read_NVM_5100,,,,Y
 Check_Fuse,,,,Y
-Read_Surimi_OTP_Version,2.2.0,2.2.0,,Y
-Read_MTK_FW_Version,2.2.0,2.2.0,,Y
+Read_Surimi_OTP_Version,4A136,4A136,,Y
+Read_MTK_FW_Version,MT2851_SDK_V1.0.0.ER25,MT2851_SDK_V1.0.0.ER25,,Y
 Read-Bundle_Version,,,,Y
 Read-NTC_Temperature,,,,Y
 ReadDUTHWID,,,,Y

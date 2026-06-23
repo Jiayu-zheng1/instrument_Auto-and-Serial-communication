@@ -87,6 +87,10 @@ def _try_legacy(text: str) -> dict:
 
     result = {}
     if t2:
+        # 双引号 key:value（JSON 风格，处理缺括号的破损格式）
+        for m in re.findall(r'"([^"]+)"\s*:\s*"([^"]*)"', t2):
+            result[m[0]] = m[1]
+        # 单引号 key:value（Python/dict 风格）
         for m in re.findall(r"'([^']+)'\s*:\s*'([^']*)'", t2):
             result[m[0]] = m[1]
 

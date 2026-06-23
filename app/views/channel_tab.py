@@ -8,6 +8,7 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from app.views.theme import Colors, FONT_FAMILY, BORDER_RADIUS
 from app.views.test_table import TestTable
 from app.views.log_panel import LogPanel
+from app.models.test_plan import TestStep
 
 
 class ChannelTab(QWidget):
@@ -159,7 +160,7 @@ class ChannelTab(QWidget):
                 f"font-size: 12px; color: {Colors.DANGER}; font-weight: 600; background: transparent;"
             )
 
-    def load_config(self, csv_rows: list[dict], headers: list[str] = None):
+    def load_config(self, csv_rows: list[TestStep], headers: list[str] = None):
         self.test_table.load_config(csv_rows, headers)
 
     def clear_results(self):

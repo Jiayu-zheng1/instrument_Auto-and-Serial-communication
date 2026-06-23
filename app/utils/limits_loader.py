@@ -2,14 +2,19 @@
 
 用法:
     from app.utils.limits_loader import load_test_data
-    headers, rows = load_test_data()
-    # rows = [{"TestName":..., "Function":..., ..., "Limits": {...}, "config": {...}}, ...]
+    plan = load_test_data()
+    for step in plan.active_steps:
+        print(step.sub_test_name, step.lower_limit)
 """
 
 import csv
 import os
+from app.utils.logger import get_logger
 from app.utils.constants import MAIN_CSV, LIMITS_CSV
 from app.utils.config_parser import parse_config
+from app.models.test_plan import TestStep, TestPlan
+
+logger = get_logger("LimitsLoader")
 
 
 def load_limits_map() -> dict[str, dict]:
@@ -22,6 +27,10 @@ def load_limits_map() -> dict[str, dict]:
         for row in reader:
             sub = row.get("SubTestName", "").strip()
             if sub:
+                if sub in limits:
+                    logger.warning(
+                        f"Limits.csv 重复 SubTestName '{sub}' — 后出现的行将覆盖之前的限制值"
+                    )
                 limits[sub] = {
                     "LowerLimit": row.get("LowerLimit", "").strip(),
                     "UpperLimit": row.get("UpperLimit", "").strip(),
@@ -31,18 +40,17 @@ def load_limits_map() -> dict[str, dict]:
     return limits
 
 
-def load_test_data() -> tuple[list[str], list[dict]]:
-    """加载 Main.csv + Limits.csv，合并后返回 (headers, rows)。
+def load_test_data() -> TestPlan:
+    """加载 Main.csv + Limits.csv，合并后返回 TestPlan。
 
     Main.csv:  TestName, Function, SubTestName, Running, config
     Limits.csv:SubTestName, LowerLimit, UpperLimit, Unit, Visible
 
-    合并后 row 包含:
-      - Main.csv 所有字段
-      - Limits: {LowerLimit, UpperLimit, Unit, Visible}
+    返回 TestPlan(headers=显示列, steps=[TestStep, ...])
+    TestStep 支持 .get() dict兼容接口，调用方无需大改。
     """
     if not os.path.exists(MAIN_CSV):
-        return [], []
+        return TestPlan()
 
     limits_map = load_limits_map()
 
@@ -50,14 +58,14 @@ def load_test_data() -> tuple[list[str], list[dict]]:
         lines = f.readlines()
 
     if not lines:
-        return [], []
+        return TestPlan()
 
     raw_headers = [h.strip() for h in lines[0].strip().split(",")]
     config_idx = raw_headers.index("config") if "config" in raw_headers else -1
     if config_idx < 0:
-        return [], []
+        return TestPlan()
 
-    rows = []
+    steps = []
     for line in lines[1:]:
         line = line.strip()
         if not line:
@@ -80,13 +88,12 @@ def load_test_data() -> tuple[list[str], list[dict]]:
         row["Unit"] = limits.get("Unit", "")
         row["Visible"] = limits.get("Visible", "Y")
 
-        rows.append(row)
+        steps.append(TestStep.from_row_dict(row))
 
-    # 供表格显示的列（Visible=N 的列也从表头中排除）
-    visible_keys = {"Visible"}
+    # 供表格显示的列
     hidden = {"Running", "config", "Visible"}
     headers = [h for h in raw_headers if h not in hidden]
-    # Limits列  + 运行时动态列（从何处来：表格显示用，but从CSV加载时为空）
+    # Limits列 + 运行时动态列
     headers += ["LowerLimit", "UpperLimit", "Unit", "Value", "Result"]
 
-    return headers, rows
+    return TestPlan(headers=headers, steps=steps)
