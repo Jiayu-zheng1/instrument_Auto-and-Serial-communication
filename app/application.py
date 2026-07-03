@@ -1,4 +1,5 @@
 """QApplication bootstrap and lifecycle."""
+
 import sys
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
@@ -16,7 +17,7 @@ class Application:
         QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
         QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
         self._qapp = QApplication(sys.argv)
-        self._qapp.setApplicationName("Read Data")
+        self._qapp.setApplicationName("instrument_Auto-and-Serial-communication")
         self._qapp.setOrganizationName("Foxlink")
         self._window = MainWindow()
 

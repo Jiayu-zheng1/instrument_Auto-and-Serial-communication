@@ -1,4 +1,4 @@
-"""Read Data — 制造测试工具入口。"""
+"""instrument_Auto-and-Serial-communication"""
 
 from app.application import Application
 

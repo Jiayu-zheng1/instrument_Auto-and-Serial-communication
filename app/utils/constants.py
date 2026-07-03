@@ -2,7 +2,7 @@
 
 import os
 
-APP_NAME = "Read Data"
+APP_NAME = "instrument_Auto-and-Serial-communication"
 APP_VERSION = "1.0.1"
 PRODUCT = ""
 SITE = "FLDG"

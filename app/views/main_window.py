@@ -65,7 +65,7 @@ class MainWindow(QMainWindow):
         self._dut_monitor.dut_detected.connect(self._on_dut_detected)
         self._dut_monitor.dut_lost.connect(self._on_dut_lost)
 
-        self.setWindowTitle("Read Data")
+        self.setWindowTitle("instrument_Auto-and-Serial-communication")
         self.resize(1024, 768)
         self.setMinimumSize(1300, 640)
         self.setUnifiedTitleAndToolBarOnMac(True)
@@ -155,8 +155,8 @@ class MainWindow(QMainWindow):
     def _build_menu_bar(self):
         mb = self.menuBar()
 
-        app_menu = mb.addMenu("Read Data")
-        about_action = QAction("关于 Read Data", self)
+        app_menu = mb.addMenu("instrument_Auto-and-Serial-communication")
+        about_action = QAction("instrument_Auto-and-Serial-communication", self)
         app_menu.addAction(about_action)
 
         app_menu.addSeparator()
@@ -166,7 +166,7 @@ class MainWindow(QMainWindow):
         app_menu.addAction(settings_action)
 
         app_menu.addSeparator()
-        quit_action = QAction("退出 Read Data", self)
+        quit_action = QAction("退出 instrument_Auto-and-Serial-communication", self)
         quit_action.setShortcut(QKeySequence.Quit)
         quit_action.triggered.connect(self.close)
         app_menu.addAction(quit_action)
