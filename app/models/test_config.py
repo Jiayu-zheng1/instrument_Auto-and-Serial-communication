@@ -16,13 +16,14 @@ class TestConfig:
     """
 
     def __init__(self, test_name: str, function: str, sub_test_name: str,
-                 lower_limit: str, upper_limit: str, config: dict):
+                 lower_limit: str, upper_limit: str, config: dict, unit: str = ""):
         self.test_name = test_name                # 测试分组名
         self.function = function                  # TestItem 方法名
         self.sub_test_name = sub_test_name        # 表格显示名
         self.lower_limit_raw = lower_limit
         self.upper_limit_raw = upper_limit
         self.config = config
+        self.unit = unit                          # 单位 (Ω / mV / 空)
 
     @property
     def lower_limit(self):
@@ -109,6 +110,7 @@ def load_test_configs(csv_rows: list[TestStep]) -> list[TestConfig]:
             lower_limit=row.get("LowerLimit", ""),
             upper_limit=row.get("UpperLimit", ""),
             config=row.get("config", {}),
+            unit=row.get("Unit", ""),
         ))
     return configs
 

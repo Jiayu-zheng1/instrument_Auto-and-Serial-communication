@@ -124,6 +124,8 @@ class ChannelRunner(BaseTestRunner):
         self.upper_limit_map = {
             c.sub_test_name: c.upper_limit_raw for c in self.configs
         }
-
+        self.unit_map = {
+            c.sub_test_name: c.unit for c in self.configs
+        }
     def get_log_lines(self) -> list[str]:
         return list(self._log_lines)

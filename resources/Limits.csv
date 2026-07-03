@@ -3,9 +3,9 @@ Info_CheckDUT,PASSED,PASSED,,Y
 Read_MLB_SN,PASSED,PASSED,,Y
 Check_USB_Ready,PASSED,PASSED,,Y
 Enter-Factory_Mode,055b03003f0100,,,Y
-Set-Fuel_Gauge_Service_Disable,,,,Y
-Set-Charger_Service_Disable,,,,Y
-Set-Turn_Off_APP_LED,,,,Y
+Set-Fuel_Gauge_Service_Disable,PASSED,PASSED,,Y
+Set-Charger_Service_Disable,PASSED,PASSED,,Y
+Set-Turn_Off_APP_LED,PASSED,PASSED,,Y
 Enable-HWID,PASSED,PASSED,,Y
 Read_NVM_5100,,,,Y
 Check_Fuse,,,,Y
@@ -14,7 +14,8 @@ Read_MTK_FW_Version,MT2851_SDK_V1.0.0.ER25,MT2851_SDK_V1.0.0.ER25,,Y
 Read-Bundle_Version,,,,Y
 Read-NTC_Temperature,,,,Y
 ReadDUTHWID,,,,Y
-Disable-HWID,,,,Y
+Read-HWID_Voltage_EAUXADC,1000,1250,mV,Y
+Disable-HWID,PASSED,PASSED,,Y
 BDA_Test,,,,Y
 Read_Color_ID,,,,Y
 Check_Syscfg_Dump,,,,Y
@@ -74,7 +75,7 @@ Measure_Voltage_PP_VSYS_CHG_To_GND,3850,3950,mV,Y
 Measure_Voltage_PP_CHG_REGN_LDO_To_GND,4780,5030,mV,Y
 Measure_Voltage_PP_VBUS_HB_To_GND,4930,5030,mV,Y
 Measure_Voltage_PP1V8_SUR_TON_RIGHT_To_GND,1700,1900,mV,Y
-Measure_Voltage_PP1V8_SUR_TON_LEFT_To_GND,1500,5500,mV,N
+Measure_Voltage_PP1V8_SUR_TON_LEFT_To_GND,1500,5500,mV,Y
 Measure_Voltage_PP_LP5811_BOOST_To_GND,4550,4650,mV,Y
 Measure_Voltage_PP_VCHG_IN_To_GND,4930,5030,mV,Y
 Measure_Voltage_PP_VBAT_To_GND,3850,3950,mV,Y

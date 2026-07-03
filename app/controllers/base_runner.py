@@ -82,7 +82,10 @@ class BaseTestRunner(QThread):
         """
         passed, label = cfg.evaluate(value)
         # 确定 Value 列显示内容
-        if cfg.is_special_limit() and "PASSED" in {cfg.lower_limit_raw, cfg.upper_limit_raw}:
+        if cfg.is_special_limit() and "PASSED" in {
+            cfg.lower_limit_raw,
+            cfg.upper_limit_raw,
+        }:
             display_value = "PASSED" if passed else "FAILED"
         else:
             display_value = value

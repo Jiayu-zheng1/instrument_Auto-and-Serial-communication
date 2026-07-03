@@ -32,7 +32,7 @@ from app.controllers.log_controller import LogController
 from app.controllers.instrument_manager import InstrumentManager
 from app.controllers.dut_monitor import DutMonitor
 from app.utils.constants import LOG_DIR
-from app.utils.limits_loader import load_test_data
+from app.utils.limits_loader import LimitsLoader
 from app.utils.config import load_config, load_channel_config
 from app.models.instruments.keysight_34970a import KEYSIGHT_34970A
 from app.models.instruments.ps_it6382 import IT6382
@@ -218,7 +218,8 @@ class MainWindow(QMainWindow):
 
     def _load_csv(self):
         try:
-            self._test_plan = load_test_data()
+            self._test_plan = LimitsLoader(logger).load_test_data()
+            print(self._test_plan.headers)
             self.test_table.load_config(self._test_plan.steps, self._test_plan.headers)
         except FileNotFoundError:
             QMessageBox.warning(
@@ -608,8 +609,8 @@ class MainWindow(QMainWindow):
             if runner.isRunning():
                 runner.test_unit.close_dut()
                 runner.running = False  # 标记停止，run() 循环下次迭代退出
-                runner.quit()           # 兼容 event-loop 线程
-                runner.wait(3000)       # 最多等3秒
+                runner.quit()  # 兼容 event-loop 线程
+                runner.wait(3000)  # 最多等3秒
                 if runner.isRunning():
                     runner.terminate()  # 兜底强制终止
                     runner.wait(1000)

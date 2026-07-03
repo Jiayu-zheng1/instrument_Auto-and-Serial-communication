@@ -18,8 +18,8 @@ ConfigCheck,Read_HEX_CMD,Read-MLB_UID,Y,("hex_cmd":"055A02000603")
 ConfigCheck,Check_R_L_board,Read-MLB_Side,Y,
 ConfigCheck,Enable_HWID,Enable-HWID,Y,
 ConfigCheck,Read_ASCII_CMD,Read-HWID,Y,('hex_cmd':'055A1200920F41542B4541。55584144433D312C310D0A','regex':'hw_id\s\W\s(\w+)','group':'1','delay':'1')
-ConfigCheck,Read_ASCII_CMD,Read-HWID_Voltage_EAUXADC,Y,('hex_cmd':'055A1200920F41542B454155584144433D342C310D0A',"regex":"adc_voltage\s+\S+\s+(\w+)\W+","group":"1","delay":"0.5")
-ConfigCheck,Read_HEX_CMD,Disable-HWID,Y,('hex_cmd':'055A2600920F41542B454750494F3D4750494F5F5345545F414C4C3A33392C302C312C302C322C300D0A')
+ConfigCheck,Read_ASCII_CMD,Read-HWID_Voltage_EAUXADC,Y,('hex_cmd':'055A1200920F41542B454155584144433D342C310D0A',"regex":"adc_voltage\s+\S+\s+(\d+)\w+","group":"1","delay":"0.5")
+ConfigCheck,Read_ASCII_CMD,Disable-HWID,Y,('hex_cmd':'055A2600920F41542B454750494F3D4750494F5F5345545F414C4C3A33392C302C312C302C322C300D0A')
 ConfigCheck,Read_ASCII_CMD,Read-Bundle_Version,Y,('hex_cmd':'055a020009800D0A','regex':'\.\[\.*\w\.*(\w+)','group':'1')
 ConfigCheck,Read_ASCII_CMD,Read_MTK_FW_Version,Y,('hex_cmd':'055a020001030D0A','regex':'\.\[\.{5}(.+)\.','group':'1')
 OPEN_SHORT,scan_resistance_slot1,scan_resistance_slot1,N,

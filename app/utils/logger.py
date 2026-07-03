@@ -18,17 +18,22 @@
 
 from loguru import logger as _logger
 from pathlib import Path
+import re as _re
 import sys
 import os
 import threading
 import time
 import shutil
 
+# loguru 轮转后的文件名: ModuleName.2026-06-24_16-37-03_787290.log
+_ROTATED_RX = _re.compile(r"^(.+?)\.(\d{4}-\d{2}-\d{2})_.+\.log$")
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  常量
 # ═══════════════════════════════════════════════════════════════════════════
 
 LOG_DIR = Path(os.path.expanduser("~/Documents/SpartaLog/TopLevelLog"))
+ARCHIVE_DIR = Path(os.path.expanduser("~/Documents/SpartaLog/unit-archive"))
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  全局状态
@@ -40,6 +45,10 @@ _module_ids: dict[str, int] = {}
 
 _worker_started = False
 _worker_lock = threading.Lock()
+
+# 单pcs 测试日志
+_unit_log_dir: Path | None = None    # 当前单元测试文件夹路径
+_unit_handler_id: int | None = None  # 单元日志 handler ID
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -57,28 +66,27 @@ def _archive_worker():
             keep_days = cfg.get("log_retention_days", 90)
             cutoff = time.time() - keep_days * 86400
 
-            # 扫描 loguru 轮转产生的旧文件: <Name>.log.<timestamp>
-            for f in LOG_DIR.glob("*.log.*"):
-                try:
-                    name = f.name
-                    # "InstrumentManager.log.2026-06-02_10-07-01_330179"
-                    base, ts_suffix = name.split(".log.", 1)
-                    date_str = ts_suffix[:10]  # "2026-06-02"
+            # 扫描 loguru 轮转产生的旧文件: ModuleName.2026-06-24_16-37-03_787290.log
+            for f in LOG_DIR.glob("*.log"):
+                name = f.name
+                m = _ROTATED_RX.match(name)
+                if not m:
+                    continue  # 跳过活跃日志（ModuleName.log 不带时间戳）
+                base = m.group(1)
+                date_str = m.group(2)  # "2026-06-24"
 
-                    date_dir = LOG_DIR / date_str
-                    date_dir.mkdir(parents=True, exist_ok=True)
-                    dst = date_dir / f"{base}.log"
+                date_dir = LOG_DIR / date_str
+                date_dir.mkdir(parents=True, exist_ok=True)
+                dst = date_dir / f"{base}.log"
 
-                    # 如果目标已存在，合并追加（同一天多次轮转）
-                    if dst.exists():
-                        with open(f, "r", encoding="utf-8", errors="ignore") as src_f:
-                            with open(dst, "a", encoding="utf-8") as dst_f:
-                                dst_f.write(src_f.read())
-                        f.unlink()
-                    else:
-                        shutil.move(str(f), str(dst))
-                except Exception:
-                    pass
+                # 如果目标已存在，合并追加（同一天多次轮转）
+                if dst.exists():
+                    with open(f, "r", encoding="utf-8", errors="ignore") as src_f:
+                        with open(dst, "a", encoding="utf-8") as dst_f:
+                            dst_f.write(src_f.read())
+                    f.unlink()
+                else:
+                    shutil.move(str(f), str(dst))
 
             # 清理过期的日期文件夹
             for date_dir in LOG_DIR.iterdir():
@@ -177,3 +185,55 @@ def get_logger(module_name: str):
     """返回绑定模块名的 logger，用法同 loguru.logger。"""
     ensure_module(module_name)
     return _logger.bind(module=module_name)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  单pcs 日志归档 — 每 pcs 一个文件夹
+# ═══════════════════════════════════════════════════════════════════════════
+
+def make_unit_folder(scan_sn: str = "", fgsn: str = "", mlbsn: str = "") -> Path:
+    """创建单pcs测试的日志文件夹。
+
+    目录名优先级: 扫描SN → DUT读取SN → 时间戳
+    重复 SN 自动追加时间戳后缀: GVVG93V6JH_20260624_143000
+
+    Returns:
+        创建的文件夹 Path
+    """
+    name = scan_sn or fgsn or mlbsn or time.strftime("%Y%m%d_%H%M%S")
+    target = ARCHIVE_DIR / name
+    if target.exists():
+        name = f"{name}_{time.strftime('%Y%m%d_%H%M%S')}"
+    unit_dir = ARCHIVE_DIR / name
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    return unit_dir
+
+
+def begin_unit_log(unit_dir: Path):
+    """为当前单元测试开启独立日志 — 所有模块日志统一写入 unit_dir/test.log。"""
+    global _unit_log_dir, _unit_handler_id
+    _init_once()  # 确保 _init_once 已完成，避免后续 initialize 清掉我们的 handler
+    _unit_log_dir = unit_dir
+    _unit_handler_id = _logger.add(
+        unit_dir / "test.log",
+        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<5} | {extra[module]} | {message}",
+        level="DEBUG",
+        encoding="utf-8",
+    )
+
+
+def end_unit_log():
+    """结束单元日志 — 关闭 unit 目录 handler。"""
+    global _unit_log_dir, _unit_handler_id
+    if _unit_handler_id is not None:
+        try:
+            _logger.remove(_unit_handler_id)
+        except Exception:
+            pass
+    _unit_handler_id = None
+    _unit_log_dir = None
+
+
+def get_unit_log_dir() -> Path | None:
+    """返回当前单元日志目录（供 CsvReport 等写入 records.csv）。"""
+    return _unit_log_dir
