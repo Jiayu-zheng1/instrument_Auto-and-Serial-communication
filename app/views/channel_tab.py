@@ -24,6 +24,7 @@ class ChannelTab(QWidget):
         super().__init__(parent)
         self._channel_id = channel_id
         self._testing = False
+        self._auto_mode = False
         self._build_ui()
 
     def _build_ui(self):
@@ -127,7 +128,7 @@ class ChannelTab(QWidget):
 
     def set_running(self, running: bool):
         self._testing = running
-        self.sn_input.setEnabled(not running)
+        self.sn_input.setEnabled(not running and not self._auto_mode)
         if running:
             self.start_btn.setText("⏳")
             self.start_btn.setEnabled(False)
@@ -136,19 +137,20 @@ class ChannelTab(QWidget):
                 f"font-size: 12px; color: {Colors.RUNNING}; font-weight: 600; background: transparent;"
             )
         else:
-            self.start_btn.setText("Start")
-            self.start_btn.setEnabled(True)
+            self.start_btn.setText("Start" if not self._auto_mode else "Auto")
+            self.start_btn.setEnabled(not self._auto_mode)
             self._status_lbl.setText("Ready")
             self._status_lbl.setStyleSheet(
                 f"font-size: 12px; color: {Colors.TEXT_TERTIARY}; background: transparent;"
             )
-            self.sn_input.clear()
+            if not self._auto_mode:
+                self.sn_input.clear()
 
     def set_done(self, passed: bool):
         self._testing = False
-        self.sn_input.setEnabled(True)
-        self.start_btn.setText("Start")
-        self.start_btn.setEnabled(True)
+        self.sn_input.setEnabled(not self._auto_mode)
+        self.start_btn.setText("Start" if not self._auto_mode else "Auto")
+        self.start_btn.setEnabled(not self._auto_mode)
         if passed:
             self._status_lbl.setText("✅ PASS")
             self._status_lbl.setStyleSheet(
@@ -159,6 +161,20 @@ class ChannelTab(QWidget):
             self._status_lbl.setStyleSheet(
                 f"font-size: 12px; color: {Colors.DANGER}; font-weight: 600; background: transparent;"
             )
+
+    def set_auto_mode(self, auto: bool):
+        """切换自动/手动模式：自动模式下禁用 SN 输入和 Start 按钮。"""
+        self._auto_mode = auto
+        if auto:
+            self.sn_input.setEnabled(False)
+            self.sn_input.setPlaceholderText("自动测试模式…")
+            self.start_btn.setEnabled(False)
+            self.start_btn.setText("Auto")
+        else:
+            self.sn_input.setEnabled(True)
+            self.sn_input.setPlaceholderText("Scan SN")
+            self.start_btn.setEnabled(True)
+            self.start_btn.setText("Start")
 
     def load_config(self, csv_rows: list[TestStep], headers: list[str] = None):
         self.test_table.load_config(csv_rows, headers)

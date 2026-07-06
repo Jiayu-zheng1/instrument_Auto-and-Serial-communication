@@ -1,19 +1,40 @@
-"""ChannelRunner — 多通道测试执行器，每个通道独立线程 + DUT + 测试序列。"""
+"""ChannelRunner — 多通道测试执行器，独立 DUT + 测试序列 + CSV 报表 + SN 日志归档。
 
+信号:
+    signal_value(ch, display, value)       — 测量值
+    signal_result(ch, display, label)      — Pass/Fail
+    signal_color(ch, display, result)      — 行颜色
+    signal_channel_done(ch, bool)          — 测试完成
+    signal_log(ch, msg)                    — 日志行
+    signal_display(ch, scan_sn, fgsn)      — SN 显示
+"""
+
+import re as _re
+import time as _time
 from PyQt5.QtCore import pyqtSignal
-from app.utils.logger import get_logger
+from app.utils.logger import get_logger, begin_unit_log, end_unit_log, make_unit_folder
 
 logger = get_logger("ChannelRunner")
 from app.controllers.base_runner import BaseTestRunner
 from app.models.test_item import TestItem
 from app.models.test_config import TestConfig, load_test_configs
 from app.models.test_plan import TestStep
+from app.models.sfc_connector import SFCConnector
 from app.models.device import find_port_by_location
+from app.utils.csv_handler import CsvReport, RecordsCsvWriter
 from app.utils.config import load_config
+
+# 去除 HTML 标签
+_STRIP_HTML = _re.compile(r"<[^>]+>")
 
 
 class ChannelRunner(BaseTestRunner):
-    """多通道测试线程：独立 DUT 连接、独立测试序列、独立信号（带 channel_id 前缀）。"""
+    """多通道测试线程：独立 DUT 连接、独立测试序列、CSV 报表、SN 日志归档。
+
+    与 TestRunner 对称：
+    - TestRunner  : 单通道，全局仪器
+    - ChannelRunner: 多通道，独立仪器实例（dmm/ps/relay 构造注入）
+    """
 
     signal_value = pyqtSignal(str, str, str)
     signal_result = pyqtSignal(str, str, str)
@@ -37,9 +58,13 @@ class ChannelRunner(BaseTestRunner):
             instrument_manager=instrument_manager, dmm=dmm, ps=ps, relay=relay,
         )
         self.configs: list[TestConfig] = []
-        self.FGSN: str = ""
+        self.test_items: list[str] = []
+        self.lower_limit_map: dict = {}
+        self.upper_limit_map: dict = {}
+        self.unit_map: dict = {}
         self._log_lines: list[str] = []
         self._last_value = None
+        self._sfc_cfg: dict = {}
 
     # ── 钩子实现 ──
 
@@ -50,23 +75,22 @@ class ChannelRunner(BaseTestRunner):
         self.signal_result.emit(self._channel_id, test_item, label)
 
     def _emit_color(self, test_item: str, color: str):
-        self.signal_color.emit(self._channel_id, color)
+        self.signal_color.emit(self._channel_id, test_item, color)
 
     def _log(self, msg: str):
         self._log_lines.append(msg)
-        logger.info(msg)
+        logger.info(_STRIP_HTML.sub("", msg).strip())
         self.signal_log.emit(self._channel_id, msg)
 
     # ── 主循环 ──
 
     def run(self):
-        loc_str = self._location_id or "auto"
-        self._log(f"通道 {self._channel_id} 开始测试 (location={loc_str})")
+        self._log(f"通道 {self._channel_id} 开始测试 (location={self._location_id or 'auto'})")
 
         if self._location_id:
             port = find_port_by_location(self._location_id)
             if port is None:
-                self._log(f"  [{self._channel_id}] ⚠ 未找到 DUT 串口 (location={loc_str})")
+                self._log(f"  [{self._channel_id}] ⚠ 未找到 DUT 串口 (location={self._location_id})")
             else:
                 self._log(f"  [{self._channel_id}] DUT 串口: {port}")
             self.test_unit._dut_port = port
@@ -77,17 +101,43 @@ class ChannelRunner(BaseTestRunner):
         self._test_status = True
         self.test_unit.ScanSN = channel_sn
         self._load_configs()
+        self._load_system_config()
+
+        # ── 创建单pcs 日志文件夹 ──
+        unit_dir = make_unit_folder(scan_sn=self._sn or channel_sn)
+        _unit_handler = begin_unit_log(unit_dir)
+
+        # unit 目录写 records.csv（17列格式）
+        unit_records = RecordsCsvWriter(str(unit_dir))
+
+        # 总的日聚合 CSV（Test_CSV/YYYYMMDD.csv）
+        csv_report = CsvReport(
+            self.test_items,
+            self.upper_limit_map,
+            self.lower_limit_map,
+            self.unit_map,
+        )
+        self._test_values: dict[str, str] = {}
 
         for cfg in self.configs:
+            display = cfg.sub_test_name
+            method = cfg.function
+            step_passed = True
+            step_value_str = ""
+            step_failure = ""
+
             try:
-                display = cfg.sub_test_name
-                method = cfg.function
                 self._log(f"  [{self._channel_id}] {display} → {method}")
                 value = self._run_one(display, method, cfg.config)
 
                 if value is not None:
+                    self._test_values[display] = str(value)
+                    step_value_str = str(value)
                     self._evaluate_result(display, str(value), cfg)
                 else:
+                    self._test_values[display] = "None"
+                    step_value_str = "None"
+                    step_passed = False
                     display_value = "FAILED" if cfg.is_special_limit() else "None"
                     self.signal_value.emit(self._channel_id, display, display_value)
                     self.signal_result.emit(self._channel_id, display, "Fail")
@@ -96,24 +146,91 @@ class ChannelRunner(BaseTestRunner):
 
             except Exception as e:
                 self._log(f"  [{self._channel_id}] 错误: {cfg.sub_test_name} — {e}")
+                self._test_values[cfg.sub_test_name] = "Error"
+                step_value_str = "Error"
+                step_passed = False
+                step_failure = str(e)
                 display_value = "FAILED" if cfg.is_special_limit() else str(e)
                 self.signal_value.emit(self._channel_id, display, display_value)
                 self.signal_result.emit(self._channel_id, display, "Fail")
                 self.signal_color.emit(self._channel_id, display, "Fail")
                 self._test_status = False
 
+            # ── 写入单pcs records.csv ──
+            unit_records.write_step(
+                test_name=cfg.test_name,
+                sub_test_name=cfg.sub_test_name,
+                sub_sub_test=cfg.sub_test_name,
+                upper_limit=cfg.upper_limit_raw,
+                lower_limit=cfg.lower_limit_raw,
+                unit=cfg.unit,
+                value=step_value_str,
+                status="PASS" if step_passed else "FAIL",
+                failure_message=step_failure if not step_passed else "",
+            )
+
             if self._fail_stop and not self._test_status:
                 self._log(f"  [{self._channel_id}] Fail-stop 已启用，停止后续测试")
                 break
 
             if self.test_unit.FGSN:
-                self.FGSN = f"{self.test_unit.FGSN}_{self._channel_id}"
-                self.signal_display.emit(self._channel_id, channel_sn, self.FGSN)
+                self.signal_display.emit(self._channel_id, channel_sn, self.test_unit.FGSN)
+
+        # ── 写入属性行（SN 信息） ──
+        if self._sn:
+            unit_records.write_attribute("PrimaryIdentity", self._sn)
+        if self.test_unit.FGSN:
+            unit_records.write_attribute("FG_SN", self.test_unit.FGSN)
+        if getattr(self.test_unit, "MLBSN", None):
+            unit_records.write_attribute("MLB_SN", self.test_unit.MLBSN or "")
+
+        # SN 优先级: MLBSN → FGSN → ScanSN → 时间戳
+        final_sn = (
+            getattr(self.test_unit, "MLBSN", None)
+            or self.test_unit.FGSN
+            or self._sn
+            or _time.strftime("%Y%m%d_%H%M%S")
+        )
+
+        # 日聚合 CSV
+        csv_report.set_csv_file(final_sn, self._test_values)
+
+        # SFC 上传
+        self._upload_sfc()
 
         self.test_unit.close_dut()
         status_text = "PASS" if self._test_status else "FAIL"
         self._log(f"通道 {self._channel_id} 测试完成: {status_text}")
+        end_unit_log(_unit_handler)
         self.signal_channel_done.emit(self._channel_id, self._test_status)
+
+    def _load_system_config(self):
+        cfg = load_config()
+        self._fail_stop = cfg.get("fail_stop_test", True)
+        self._sfc_cfg = {
+            "url": cfg.get("sfc_url", ""),
+            "online": cfg.get("sfc_online", False),
+            "vip": cfg.get("sfc_vip", ""),
+        }
+
+    def _upload_sfc(self):
+        if not self._sfc_cfg.get("online") or not self._sfc_cfg.get("url"):
+            return
+        sn = self._sn or self.test_unit.FGSN or ""
+        if not sn:
+            return
+        try:
+            sfc = SFCConnector(
+                url=self._sfc_cfg["url"],
+                vip=self._sfc_cfg["vip"],
+                online=True,
+            )
+            sfc.connect()
+            sfc.check_route(sn)
+            sfc.upload_result(sn, self._test_status)
+            logger.info(f"[{self._channel_id}] SFC 上传完成: SN={sn}")
+        except Exception as e:
+            logger.error(f"[{self._channel_id}] SFC 上传失败: {e}")
 
     def _load_configs(self):
         self.configs = load_test_configs(self._csv_rows)
@@ -124,8 +241,7 @@ class ChannelRunner(BaseTestRunner):
         self.upper_limit_map = {
             c.sub_test_name: c.upper_limit_raw for c in self.configs
         }
-        self.unit_map = {
-            c.sub_test_name: c.unit for c in self.configs
-        }
+        self.unit_map = {c.sub_test_name: c.unit for c in self.configs}
+
     def get_log_lines(self) -> list[str]:
         return list(self._log_lines)

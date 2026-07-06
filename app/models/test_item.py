@@ -99,11 +99,11 @@ class TestItem:
         return self._measurement.Read_HEX_CMD(method_name, config)
 
     def Read_IMPEDANCE(self, method_name, config):
-        return "PASS"
+        # return "PASS"
         return self._measurement.Read_IMPEDANCE(method_name, config)
 
     def Read_VOLTAGE(self, method_name, config):
-        return "PASS"
+        # return "PASS"
         return self._measurement.Read_VOLTAGE(method_name, config)
 
     # ═══════════════════════════════════════════════════════════════════════

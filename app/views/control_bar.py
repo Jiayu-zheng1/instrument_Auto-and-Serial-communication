@@ -1,13 +1,27 @@
 """HIG-styled control bar — SN input, Start button, timer, logo, instrument gear, 仪器状态。"""
+
 from PyQt5.QtWidgets import (
-    QWidget, QHBoxLayout, QLineEdit, QPushButton, QLabel, QFrame, QTextEdit
+    QWidget,
+    QHBoxLayout,
+    QLineEdit,
+    QPushButton,
+    QLabel,
+    QFrame,
+    QTextEdit,
 )
 from PyQt5.QtGui import QFont, QPixmap
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 import os
 from app.views.theme import (
-    Colors, FONT_FAMILY, FONT_TITLE_2, FONT_BODY,
-    BUTTON_HEIGHT, INPUT_HEIGHT, ELEMENT_GAP, MARGIN, BORDER_RADIUS
+    Colors,
+    FONT_FAMILY,
+    FONT_TITLE_2,
+    FONT_BODY,
+    BUTTON_HEIGHT,
+    INPUT_HEIGHT,
+    ELEMENT_GAP,
+    MARGIN,
+    BORDER_RADIUS,
 )
 from app.utils.constants import SN_MAX_LENGTH
 from app.views.animations import start_pulse, stop_pulse
@@ -44,13 +58,13 @@ class ControlBar(QWidget):
         layout.setSpacing(ELEMENT_GAP)
 
         # Logo
-        self.logo_label = QLabel()
-        logo_path = os.path.join(os.path.dirname(__file__), "..", "..", "resources", "logo_foxlink_b.png")
-        if os.path.exists(logo_path):
-            pix = QPixmap(logo_path)
-            if not pix.isNull():
-                self.logo_label.setPixmap(pix.scaled(160, 30, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        layout.addWidget(self.logo_label)
+        # self.logo_label = QLabel()
+        # logo_path = os.path.join(os.path.dirname(__file__), "..", "..", "resources", "logo_foxlink_b.png")
+        # if os.path.exists(logo_path):
+        #     pix = QPixmap(logo_path)
+        #     if not pix.isNull():
+        #         self.logo_label.setPixmap(pix.scaled(160, 30, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        # layout.addWidget(self.logo_label)
 
         # ── 仪器状态圆点 ──
         for name, label in STATUS_LABELS.items():
@@ -209,7 +223,9 @@ class ControlBar(QWidget):
             start_pulse(self.dut_dot, min_opacity=0.5, duration=800)
         else:
             stop_pulse(self.dut_dot)
-            self.dut_dot.setStyleSheet(f"color: {Colors.TEXT_TERTIARY}; font-size: 12px;")
+            self.dut_dot.setStyleSheet(
+                f"color: {Colors.TEXT_TERTIARY}; font-size: 12px;"
+            )
             self.dut_label.setStyleSheet(f"color: {Colors.TEXT_TERTIARY};")
 
     def is_auto_mode(self) -> bool:

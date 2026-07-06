@@ -31,7 +31,7 @@ from app.controllers.channel_runner import ChannelRunner
 from app.controllers.log_controller import LogController
 from app.controllers.instrument_manager import InstrumentManager
 from app.controllers.dut_monitor import DutMonitor
-from app.utils.constants import LOG_DIR
+from app.controllers.multi_channel_monitor import MultiChannelDutMonitor
 from app.utils.limits_loader import LimitsLoader
 from app.utils.config import load_config, load_channel_config
 from app.models.instruments.keysight_34970a import KEYSIGHT_34970A
@@ -49,7 +49,7 @@ class MainWindow(QMainWindow):
         self._runner: TestRunner | None = None
         self._runners: list[ChannelRunner] = []  # 多通道 runners
         self._multi_testing_channels: set[str] = set()  # 正在测试的通道
-        self._log_ctrl = LogController(LOG_DIR)
+        self._log_ctrl = LogController()
         self._testing = False
 
         self._instr_mgr = InstrumentManager.instance()
@@ -64,6 +64,9 @@ class MainWindow(QMainWindow):
         self._dut_monitor = DutMonitor(location_id=loc)
         self._dut_monitor.dut_detected.connect(self._on_dut_detected)
         self._dut_monitor.dut_lost.connect(self._on_dut_lost)
+
+        # 多通道 DUT 监控 — 每个通道独立监控其 location_id
+        self._multi_monitor: MultiChannelDutMonitor | None = None
 
         self.setWindowTitle("instrument_Auto-and-Serial-communication")
         self.resize(1024, 768)
@@ -82,10 +85,11 @@ class MainWindow(QMainWindow):
         if not self._multi_mode:
             self._dut_monitor.start()
 
-        # 多通道模式：初始化 tab 并切换到多通道视图
+        # 多通道模式：初始化 tab + 多通道 DUT 监控
         if self._multi_mode:
             self._rebuild_multi_channel_tabs()
             self._stacked.setCurrentIndex(1)
+            self._init_multi_monitor()
 
     # ── UI 构建 ──────────────────────────────────────────────────────────
 
@@ -317,10 +321,14 @@ class MainWindow(QMainWindow):
                 self._rebuild_multi_channel_tabs()
                 self._stacked.setCurrentIndex(1)
                 self._dut_monitor.pause()
+                self._init_multi_monitor()
             else:
                 self._stacked.setCurrentIndex(0)
                 self._dut_monitor.set_location_id(loc)
                 self._dut_monitor.resume()
+                if self._multi_monitor:
+                    self._multi_monitor.stop_monitor()
+                    self._multi_monitor = None
 
         self.control_bar.set_auto_mode(auto)
         self._dut_monitor.set_location_id(loc)
@@ -348,6 +356,47 @@ class MainWindow(QMainWindow):
         self.control_bar.set_dut_status(False)
         self.log_panel.append_log("DUT 已断开")
 
+    # ── 多通道 DUT 监控 ──────────────────────────────────────────────
+
+    def _init_multi_monitor(self):
+        """初始化多通道 DUT 监控（从 channel_config 读取各通道 location_id）。"""
+        ch_cfg = load_channel_config()
+        loc_ids = ch_cfg.get("location_ids", [])
+        channel_loc_map: dict[str, str] = {}
+        cfg = load_config()
+        channel_count = cfg.get("channel_count", 4)
+        for i in range(channel_count):
+            ch = f"CH{i + 1}"
+            loc = loc_ids[i] if i < len(loc_ids) else ""
+            if loc:
+                channel_loc_map[ch] = loc
+
+        if self._multi_monitor:
+            self._multi_monitor.stop_monitor()
+            self._multi_monitor.channel_dut_detected.disconnect()
+            self._multi_monitor.channel_dut_lost.disconnect()
+
+        self._multi_monitor = MultiChannelDutMonitor(channel_loc_map)
+        self._multi_monitor.channel_dut_detected.connect(self._on_channel_dut_detected)
+        self._multi_monitor.channel_dut_lost.connect(self._on_channel_dut_lost)
+        self._multi_monitor.start()
+
+    def _on_channel_dut_detected(self, channel_id: str, device: str):
+        """多通道模式下某通道 DUT 检测到 → 自动模式触发测试。"""
+        ct = self._channel_tabs.get(channel_id)
+        if ct:
+            ct.append_log(f"DUT 已连接: {device}")
+        cfg = load_config()
+        if cfg.get("auto_test_mode", False):
+            self.log_panel.append_log(f"🔵 [{channel_id}] DUT 已连接，自动开始测试")
+            self._start_test(only_channel=channel_id)
+
+    def _on_channel_dut_lost(self, channel_id: str):
+        """多通道模式下某通道 DUT 断开。"""
+        ct = self._channel_tabs.get(channel_id)
+        if ct:
+            ct.append_log("⚠ DUT 已断开")
+
     def _on_status(self, passed: bool):
         self.status_header.add_result(passed)
         if passed:
@@ -373,6 +422,7 @@ class MainWindow(QMainWindow):
         cfg = load_config()
         channel_count = cfg.get("channel_count", 4)
         loc_ids = cfg.get("channel_location_ids", ["", "", "", ""])
+        auto_mode = cfg.get("auto_test_mode", False)
 
         # 清除旧 tab
         if self._tab_widget:
@@ -399,7 +449,7 @@ class MainWindow(QMainWindow):
         # Summary Tab
         self._summary_tab = SummaryTab(channel_count)
         self._summary_tab.channel_selected.connect(self._on_summary_channel_selected)
-        self._tab_widget.addTab(self._summary_tab, "📊 Summary")
+        self._tab_widget.addTab(self._summary_tab, "Summary")
 
         # 通道 Tabs
         self._channel_tabs = {}
@@ -408,6 +458,7 @@ class MainWindow(QMainWindow):
             ct = ChannelTab(ch)
             ct.load_config(self._test_plan.steps, self._test_plan.headers)
             ct.set_auto_scroll(cfg.get("auto_scroll_log", True))
+            ct.set_auto_mode(auto_mode)  # 自动模式下禁用 SN 输入和 Start 按钮
             ct.start_requested.connect(
                 self._start_test
             )  # 每个通道独立 Start 也走统一入口
@@ -439,7 +490,7 @@ class MainWindow(QMainWindow):
             for card in self._summary_tab.cards.values() if self._summary_tab else []:
                 card.set_running()
             self.status_header.set_running()
-            self.log_panel.append_log("🚀 全局 Start — 所有通道启动")
+            self.log_panel.append_log("全局 Start — 所有通道启动")
 
         cfg = load_config()
         ch_cfg = load_channel_config()
@@ -615,5 +666,7 @@ class MainWindow(QMainWindow):
                     runner.terminate()  # 兜底强制终止
                     runner.wait(1000)
         self._dut_monitor.stop_monitor()
+        if self._multi_monitor:
+            self._multi_monitor.stop_monitor()
         self._instr_mgr.shutdown()
         event.accept()

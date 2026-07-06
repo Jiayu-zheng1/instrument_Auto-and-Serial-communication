@@ -1,4 +1,4 @@
-"""CSV report file handler — ported from CSV/Create.py."""
+"""CSV 处理器 — 日聚合 CsvReport + 单pcs RecordsCsvWriter。"""
 import os
 import csv
 import time

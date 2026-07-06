@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from PyQt5.QtCore import QObject, pyqtSignal
 from loguru import logger as _raw_logger  # raw loguru 实例，用于 add handler
-from app.utils.logger import get_logger, ensure_module
+from app.utils.logger import get_logger
 
 logger = get_logger("LogController")
 
@@ -39,16 +39,15 @@ class LogController:
 
     UI_FMT = "{time:YYYY-MM-DD HH:mm:ss.SS} | {level:<5} | {extra[module]} | {message}"
 
-    def __init__(self, log_path: str):
-        self.log_path = Path(log_path)
+    def __init__(self, log_path: str = ""):
         self._handler: LogHandler | None = None
 
     def initialize(self):
-        """初始化由 app/utils/logger 统一处理，此处只确保 LogController 模块存在。"""
-        ensure_module("LogController")
+        """初始化 — 触发 loguru stdout handler 配置。"""
+        get_logger("LogController")
 
     def _path_logger(self):
-        """兼容旧接口。"""
+        """兼容旧接口 — 不再按模块分文件。"""
         pass
 
     def rename_log(self, sn: str = ""):

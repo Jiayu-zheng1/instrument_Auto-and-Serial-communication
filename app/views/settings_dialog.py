@@ -1030,7 +1030,7 @@ class SettingsDialog(QDialog):
             FluentIcon.FOLDER,
             "日志保存路径",
             os.path.expanduser(
-                self._system_config.get("log_path", "~/Documents/SpartaLog/TopLevelLog")
+                self._system_config.get("log_path", "~/Documents/SpartaLog/unit-archive")
             ),
         )
         self._log_path_card.clicked.connect(self._on_select_log_path)

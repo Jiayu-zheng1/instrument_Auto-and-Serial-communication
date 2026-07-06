@@ -74,12 +74,12 @@ class TestRunner(BaseTestRunner):
 
         # ── 创建单pcs 日志文件夹 ──
         unit_dir = make_unit_folder(scan_sn=self.ScanSN)
-        begin_unit_log(unit_dir)
+        _unit_handler = begin_unit_log(unit_dir)
 
         # unit 目录写 records.csv（17列格式）
         unit_records = RecordsCsvWriter(str(unit_dir))
 
-        # 总的日聚合 CSV（旧格式不变）
+        # 总的日聚合 CSV（Test_CSV/YYYYMMDD.csv）
         csv_report = CsvReport(
             self.test_items,
             self.upper_limit_map,
@@ -147,14 +147,6 @@ class TestRunner(BaseTestRunner):
             if self.test_unit.FGSN:
                 self.signal_display.emit(self.ScanSN, self.test_unit.FGSN)
 
-        # SN 优先级: MLBSN → FGSN → ScanSN → 时间戳
-        final_sn = (
-            getattr(self.test_unit, "MLBSN", None)
-            or self.test_unit.FGSN
-            or self.ScanSN
-            or _time.strftime("%Y%m%d_%H%M%S")
-        )
-
         # ── 写入属性行（SN 信息） ──
         if self.ScanSN:
             unit_records.write_attribute("PrimaryIdentity", self.ScanSN)
@@ -163,9 +155,16 @@ class TestRunner(BaseTestRunner):
         if getattr(self.test_unit, "MLBSN", None):
             unit_records.write_attribute("MLB_SN", self.test_unit.MLBSN or "")
 
-        csv_sn = final_sn
-        # 总的日聚合 CSV（Test_CSV/YYYYMMDD.csv）— 保留原逻辑不变
-        csv_report.set_csv_file(csv_sn, self._test_values)
+        # SN 优先级: MLBSN → FGSN → ScanSN → 时间戳
+        final_sn = (
+            getattr(self.test_unit, "MLBSN", None)
+            or self.test_unit.FGSN
+            or self.ScanSN
+            or _time.strftime("%Y%m%d_%H%M%S")
+        )
+
+        # 总的日聚合 CSV（Test_CSV/YYYYMMDD.csv）
+        csv_report.set_csv_file(final_sn, self._test_values)
 
         self._upload_sfc()
         self.stop()
@@ -209,7 +208,7 @@ class TestRunner(BaseTestRunner):
         self.test_unit.close_dut()
         self.signal_stop.emit()
         self._log_controller.rename_log(self.test_unit.FGSN)
-        end_unit_log()
+        end_unit_log(_unit_handler)
 
     def _load_configs(self):
         self.configs = load_test_configs(self._csv_rows)

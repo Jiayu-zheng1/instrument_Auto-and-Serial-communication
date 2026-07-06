@@ -7,6 +7,7 @@ import time
 import threading
 
 import logging
+
 logger = logging.getLogger("KEYSIGHT_34970A")
 
 # FTDI USB转GPIB适配器, 在系统中表现为串口
@@ -17,7 +18,6 @@ from app.models.instruments.base import BaseInstrument
 
 
 class KEYSIGHT_34970A(BaseInstrument):
-
     def __init__(self, gpipID, serial_port: str = ""):
         self.gpipID = gpipID
         self.serial_port = serial_port
@@ -50,10 +50,10 @@ class KEYSIGHT_34970A(BaseInstrument):
                 port = self.serial_port or str(self.gpipID)
 
                 # ── 判断连接类型 ──
-                if 'GPIB' in port.upper():
+                if "GPIB" in port.upper():
                     # GPIB 资源字符串 (e.g. "GPIB0::11::INSTR") → NI-VISA 直连
                     self._connect_gpib(port)
-                elif port.startswith('/'):
+                elif port.startswith("/"):
                     # 串口路径 (e.g. "/dev/cu.usbserial-xxx") → pyvisa-py ASRL
                     self._connect_usb(port)
                 elif port.isdigit():
@@ -68,16 +68,16 @@ class KEYSIGHT_34970A(BaseInstrument):
                     return self.instrument
 
                 # ── 兜底：扫描 GPIB 资源列表 ──
-                gpib_addr = 'GPIB0::' + str(self.gpipID) + '::INSTR'
+                gpib_addr = "GPIB0::" + str(self.gpipID) + "::INSTR"
                 rm = pyvisa.ResourceManager()
                 for res in rm.list_resources():
                     if gpib_addr in res:
                         self.instrument = rm.open_resource(gpib_addr)
                         self._connected = True
-                        logger.info(f'34970A GPIB 连接成功: {gpib_addr}')
+                        logger.info(f"34970A GPIB 连接成功: {gpib_addr}")
                         return self.instrument
 
-                logger.warning('34970A 未找到仪器')
+                logger.warning("34970A 未找到仪器")
                 return None
             except Exception as e:
                 logger.error(f"34970A init error: {e}")
@@ -88,21 +88,22 @@ class KEYSIGHT_34970A(BaseInstrument):
     def _connect_usb(self, port: str):
         """USB 串口连接 (FTDI 适配器 via pyvisa-py)。"""
         try:
-            rm_usb = pyvisa.ResourceManager('@py')
-            self.instrument = rm_usb.open_resource(f'ASRL{port}::INSTR')
+            rm_usb = pyvisa.ResourceManager("@py")
+            self.instrument = rm_usb.open_resource(f"ASRL{port}::INSTR")
             self.instrument.baud_rate = USB_BAUDRATE
-            self.instrument.read_termination = '\n'
-            self.instrument.write_termination = '\n'
+            self.instrument.read_termination = "\n"
+            self.instrument.write_termination = "\n"
             self.instrument.timeout = 5000
             time.sleep(0.5)
-            self.instrument.write('*CLS')
+            self.instrument.write("*CLS")
             time.sleep(0.2)
-            idn = self.instrument.query('*IDN?').strip()
+            idn = self.instrument.query("*IDN?").strip()
             self._connected = True
-            logger.info(f'34970A USB 连接成功: {port} -> {idn}')
+            logger.info(f"34970A USB 连接成功: {port} -> {idn}")
         except Exception as e:
-            logger.error(f'34970A USB 连接失败 ({port}): {e}')
+            logger.error(f"34970A USB 连接失败 ({port}): {e}")
             import traceback
+
             logger.error(traceback.format_exc())
             self.instrument = None
             self._connected = False
@@ -113,36 +114,36 @@ class KEYSIGHT_34970A(BaseInstrument):
             rm = pyvisa.ResourceManager()
             self.instrument = rm.open_resource(resource_str)
             self.instrument.timeout = 5000
-            idn = self.instrument.query('*IDN?').strip()
-            logger.info(f'34970A GPIB 连接成功: {resource_str} -> {idn}')
+            idn = self.instrument.query("*IDN?").strip()
+            logger.info(f"34970A GPIB 连接成功: {resource_str} -> {idn}")
         except Exception as e:
-            logger.error(f'34970A GPIB 连接失败 ({resource_str}): {e}')
+            logger.error(f"34970A GPIB 连接失败 ({resource_str}): {e}")
             self.instrument = None
 
     def _connect_gpib_by_id(self, gpib_id: int):
         """按 GPIB ID 扫描连接 (NI-VISA)。"""
-        resource_str = f'GPIB0::{gpib_id}::INSTR'
+        resource_str = f"GPIB0::{gpib_id}::INSTR"
         try:
             rm = pyvisa.ResourceManager()
             for res in rm.list_resources():
                 if resource_str in res:
                     self.instrument = rm.open_resource(resource_str)
                     self.instrument.timeout = 5000
-                    idn = self.instrument.query('*IDN?').strip()
-                    logger.info(f'34970A GPIB 连接成功: {resource_str} -> {idn}')
+                    idn = self.instrument.query("*IDN?").strip()
+                    logger.info(f"34970A GPIB 连接成功: {resource_str} -> {idn}")
                     return
-            logger.warning(f'34970A GPIB 未找到资源: {resource_str}')
+            logger.warning(f"34970A GPIB 未找到资源: {resource_str}")
             self.instrument = None
         except Exception as e:
-            logger.error(f'34970A GPIB 连接失败 ({resource_str}): {e}')
+            logger.error(f"34970A GPIB 连接失败 ({resource_str}): {e}")
             self.instrument = None
 
     def set_RES(self, channel):
         with self._lock:
             try:
-                self.instrument.write(f'CONF:RES (@{channel})')
+                self.instrument.write(f"CONF:RES (@{channel})")
                 time.sleep(0.05)
-                self.instrument.write('TRIG:SOUR IMM')
+                self.instrument.write("TRIG:SOUR IMM")
                 time.sleep(0.05)
                 check_error = self.query_DMMerror()
                 if check_error[0]:
@@ -156,9 +157,9 @@ class KEYSIGHT_34970A(BaseInstrument):
     def set_DCV(self, channel):
         with self._lock:
             try:
-                self.instrument.write(f'CONF:VOLT:DC (@{channel})')
+                self.instrument.write(f"CONF:VOLT:DC (@{channel})")
                 time.sleep(0.1)
-                self.instrument.write('TRIG:SOUR IMM')
+                self.instrument.write("TRIG:SOUR IMM")
                 time.sleep(0.1)
                 check_error = self.query_DMMerror()
                 if check_error[0]:
@@ -172,28 +173,16 @@ class KEYSIGHT_34970A(BaseInstrument):
     def get_DMMvalue(self):
         with self._lock:
             try:
-                DMMvalue = float(self.instrument.query('READ?'))
+                DMMvalue = float(self.instrument.query("READ?"))
                 return str(DMMvalue)
             except Exception as e:
                 print(f"读取错误: {e}")
-                return '-9999'
-
-    def measure_dcv(self, channel, unit='V'):
-        """一键测量直流电压, unit='V'或'mV'"""
-        with self._lock:
-            try:
-                value = float(self.instrument.query(f'MEAS:VOLT:DC? (@{channel})'))
-                if unit == 'mV':
-                    value = round(value * 1000, 3)
-                return value
-            except Exception as e:
-                print(f"测量错误: {e}")
-                return None
+                return "-9999"
 
     def query_DMMerror(self):
         with self._lock:
             try:
-                error = self.instrument.query('SYSTem:ERRor?')
+                error = self.instrument.query("SYSTem:ERRor?")
                 if "No error" in error:
                     return True, None
                 else:
@@ -206,13 +195,13 @@ class KEYSIGHT_34970A(BaseInstrument):
         """扫描通道电阻, 每批最多10个通道"""
         with self._lock:
             try:
-                slot_list = [s.strip() for s in channels.split(',')]
+                slot_list = [s.strip() for s in channels.split(",")]
                 all_results = {}
                 batch_size = 10
                 for batch_start in range(0, len(slot_list), batch_size):
-                    batch = slot_list[batch_start:batch_start + batch_size]
-                    batch_channels = ','.join(batch)
-                    self.instrument.write('*RST')
+                    batch = slot_list[batch_start : batch_start + batch_size]
+                    batch_channels = ",".join(batch)
+                    self.instrument.write("*RST")
                     time.sleep(0.5)
                     self.instrument.write(f"ROUT:SCAN (@{batch_channels})")
                     time.sleep(0.5)
@@ -225,7 +214,7 @@ class KEYSIGHT_34970A(BaseInstrument):
                     self.instrument.write("INIT")
                     time.sleep(1.5)
                     data = self.instrument.query("FETCH?")
-                    data_values = data.strip().split(',')
+                    data_values = data.strip().split(",")
                     for i, slot in enumerate(batch):
                         if i < len(data_values):
                             try:
@@ -239,24 +228,28 @@ class KEYSIGHT_34970A(BaseInstrument):
                 print(f"错误: {e}")
                 return None
 
-    def scan_slot_dcv(self, channels=None, range_val='AUTO', resolution='DEFAULT', delay=0, unit='V'):
+    def scan_slot_dcv(
+        self, channels=None, range_val="AUTO", resolution="DEFAULT", delay=0, unit="V"
+    ):
         """扫描通道直流电压, 每批最多10个通道"""
         with self._lock:
             try:
-                slot_list = [s.strip() for s in channels.split(',')]
+                slot_list = [s.strip() for s in channels.split(",")]
                 all_results = {}
                 batch_size = 10
                 for batch_start in range(0, len(slot_list), batch_size):
-                    batch = slot_list[batch_start:batch_start + batch_size]
-                    batch_channels = ','.join(batch)
-                    self.instrument.write('*RST')
+                    batch = slot_list[batch_start : batch_start + batch_size]
+                    batch_channels = ",".join(batch)
+                    self.instrument.write("*RST")
                     time.sleep(0.3)
                     self.instrument.write(f"ROUT:SCAN (@{batch_channels})")
                     time.sleep(0.1)
-                    if range_val == 'AUTO':
+                    if range_val == "AUTO":
                         self.instrument.write(f"CONF:VOLT:DC (@{batch_channels})")
                     else:
-                        self.instrument.write(f"CONF:VOLT:DC {range_val}, {resolution}, (@{batch_channels})")
+                        self.instrument.write(
+                            f"CONF:VOLT:DC {range_val}, {resolution}, (@{batch_channels})"
+                        )
                     time.sleep(0.1)
                     self.instrument.write(f"ROUT:CHAN:DEL {delay}")
                     time.sleep(0.05)
@@ -265,12 +258,12 @@ class KEYSIGHT_34970A(BaseInstrument):
                     self.instrument.write("INIT")
                     time.sleep(1.5)
                     data = self.instrument.query("FETCH?")
-                    data_values = data.strip().split(',')
+                    data_values = data.strip().split(",")
                     for i, slot in enumerate(batch):
                         if i < len(data_values):
                             try:
                                 val = float(data_values[i])
-                                if unit == 'mV':
+                                if unit == "mV":
                                     val = round(val * 1000, 3)
                                 all_results[slot] = val
                             except ValueError:
@@ -281,25 +274,30 @@ class KEYSIGHT_34970A(BaseInstrument):
             except Exception as e:
                 print(f"错误: {e}")
                 import traceback
+
                 traceback.print_exc()
                 return None
 
-    def scan_slot_dcv_fast(self, channels=None, range_val='AUTO', resolution='DEFAULT', delay=0):
+    def scan_slot_dcv_fast(
+        self, channels=None, range_val="AUTO", resolution="DEFAULT", delay=0
+    ):
         """快速扫描通道直流电压 (不重置仪器, 保持上一次配置)"""
         with self._lock:
             try:
-                slot_list = [s.strip() for s in channels.split(',')]
+                slot_list = [s.strip() for s in channels.split(",")]
                 all_results = {}
                 batch_size = 10
                 for batch_start in range(0, len(slot_list), batch_size):
-                    batch = slot_list[batch_start:batch_start + batch_size]
-                    batch_channels = ','.join(batch)
+                    batch = slot_list[batch_start : batch_start + batch_size]
+                    batch_channels = ",".join(batch)
                     self.instrument.write(f"ROUT:SCAN (@{batch_channels})")
                     time.sleep(0.1)
-                    if range_val == 'AUTO':
+                    if range_val == "AUTO":
                         self.instrument.write(f"CONF:VOLT:DC (@{batch_channels})")
                     else:
-                        self.instrument.write(f"CONF:VOLT:DC {range_val}, {resolution}, (@{batch_channels})")
+                        self.instrument.write(
+                            f"CONF:VOLT:DC {range_val}, {resolution}, (@{batch_channels})"
+                        )
                     time.sleep(0.1)
                     self.instrument.write(f"ROUT:CHAN:DEL {delay}")
                     time.sleep(0.05)
@@ -308,7 +306,7 @@ class KEYSIGHT_34970A(BaseInstrument):
                     self.instrument.write("INIT")
                     time.sleep(1.5)
                     data = self.instrument.query("FETCH?")
-                    data_values = data.strip().split(',')
+                    data_values = data.strip().split(",")
                     for i, slot in enumerate(batch):
                         if i < len(data_values):
                             try:
@@ -321,42 +319,36 @@ class KEYSIGHT_34970A(BaseInstrument):
             except Exception as e:
                 print(f"错误: {e}")
                 import traceback
+
                 traceback.print_exc()
                 return None
 
-    def measure_dcv_single(self, channel, range_val='AUTO', resolution='DEFAULT', unit='V'):
-        """单通道直流电压测量"""
+    def measure_res(self, channel, unit="Ω"):
+        """单通道阻抗测量 (MEAS:RES? 一键完成, 不卡死)。"""
         with self._lock:
             try:
-                if range_val == 'AUTO':
-                    self.instrument.write(f'CONF:VOLT:DC (@{channel})')
-                else:
-                    self.instrument.write(f'CONF:VOLT:DC {range_val}, {resolution}, (@{channel})')
-                time.sleep(0.1)
-                self.instrument.write('TRIG:SOUR IMM')
-                time.sleep(0.05)
-                value = float(self.instrument.query('READ?'))
-                if unit == 'mV':
+                value = float(self.instrument.query(f"MEAS:RES? (@{channel})"))
+                return str(value)
+            except Exception as e:
+                print(f"测量错误: {e}")
+                return "-9999"
+
+    def measure_dcv(self, channel, unit="V"):
+        """一键测量直流电压, unit='V'或'mV'"""
+        with self._lock:
+            try:
+                value = float(self.instrument.query(f"MEAS:VOLT:DC? (@{channel})"))
+                if unit == "mV":
                     value = round(value * 1000, 3)
                 return value
             except Exception as e:
                 print(f"测量错误: {e}")
                 return None
 
-    def measure_res(self, channel, unit='Ω'):
-        """单通道阻抗测量 (MEAS:RES? 一键完成, 不卡死)。"""
-        with self._lock:
-            try:
-                value = float(self.instrument.query(f'MEAS:RES? (@{channel})'))
-                return str(value)
-            except Exception as e:
-                print(f"测量错误: {e}")
-                return '-9999'
-
     def set_DMMcls(self):
         with self._lock:
             try:
-                self.instrument.write('*CLS')
+                self.instrument.write("*CLS")
                 return "Clear DMM Errors OK"
             except Exception as e:
                 print(f"An error occurred: {e}")
@@ -365,7 +357,7 @@ class KEYSIGHT_34970A(BaseInstrument):
     def set_DMMreset(self):
         with self._lock:
             try:
-                self.instrument.write('*RST')
+                self.instrument.write("*RST")
                 return None
             except Exception as e:
                 print(f"An error occurred: {e}")
@@ -374,7 +366,7 @@ class KEYSIGHT_34970A(BaseInstrument):
     def query_IDN(self):
         with self._lock:
             try:
-                idntext = self.instrument.query('*IDN?')
+                idntext = self.instrument.query("*IDN?")
                 return idntext
             except Exception as e:
                 print(f"An error occurred: {e}")
