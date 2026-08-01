@@ -1,4 +1,4 @@
-# instrument_Auto-and-Serial-communication — 测试流程说明
+# serial-test-automation — 测试流程说明
 
 > 从点 Start 到测试完成的完整链路，精确到代码模块。
 

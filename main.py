@@ -1,4 +1,4 @@
-"""instrument_Auto-and-Serial-communication"""
+"""serial-test-automation"""
 
 from app.application import Application
 

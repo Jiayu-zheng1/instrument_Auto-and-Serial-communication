@@ -2,7 +2,7 @@
 
 import os
 
-APP_NAME = "instrument_Auto-and-Serial-communication"
+APP_NAME = "serial-test-automation"
 APP_VERSION = "1.0.1"
 PRODUCT = ""
 SITE = "FLDG"

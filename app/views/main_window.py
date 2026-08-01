@@ -68,7 +68,7 @@ class MainWindow(QMainWindow):
         # 多通道 DUT 监控 — 每个通道独立监控其 location_id
         self._multi_monitor: MultiChannelDutMonitor | None = None
 
-        self.setWindowTitle("instrument_Auto-and-Serial-communication")
+        self.setWindowTitle("serial-test-automation")
         self.resize(1024, 768)
         self.setMinimumSize(1300, 640)
         self.setUnifiedTitleAndToolBarOnMac(True)
@@ -159,8 +159,8 @@ class MainWindow(QMainWindow):
     def _build_menu_bar(self):
         mb = self.menuBar()
 
-        app_menu = mb.addMenu("instrument_Auto-and-Serial-communication")
-        about_action = QAction("instrument_Auto-and-Serial-communication", self)
+        app_menu = mb.addMenu("serial-test-automation")
+        about_action = QAction("serial-test-automation", self)
         app_menu.addAction(about_action)
 
         app_menu.addSeparator()
@@ -170,7 +170,7 @@ class MainWindow(QMainWindow):
         app_menu.addAction(settings_action)
 
         app_menu.addSeparator()
-        quit_action = QAction("退出 instrument_Auto-and-Serial-communication", self)
+        quit_action = QAction("退出 serial-test-automation", self)
         quit_action.setShortcut(QKeySequence.Quit)
         quit_action.triggered.connect(self.close)
         app_menu.addAction(quit_action)

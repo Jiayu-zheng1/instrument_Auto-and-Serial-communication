@@ -1,4 +1,4 @@
-# 串口测试自动化工具
+# serial-test-automation（串口测试自动化工具）
 
 通过串口与 DUT 通信，控制仪器（34970A DMM / IT6382 电源 / Relayboard 继电器板），执行自动化测试序列，生成 CSV 报表，并上报 SFC 系统。支持单通道和多通道并行测试。
 
@@ -56,7 +56,7 @@ python main.py
 ## 项目结构
 
 ```
-instrument_Auto-and-Serial-communication/
+serial-test-automation/
 ├── main.py                          # 入口
 ├── requirements.txt                 # Python 依赖
 ├── visa_demo.py                     # pyvisa 仪器通信演示脚本

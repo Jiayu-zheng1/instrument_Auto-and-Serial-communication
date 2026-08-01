@@ -17,7 +17,7 @@ class Application:
         QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
         QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
         self._qapp = QApplication(sys.argv)
-        self._qapp.setApplicationName("instrument_Auto-and-Serial-communication")
+        self._qapp.setApplicationName("serial-test-automation")
         self._qapp.setOrganizationName("Foxlink")
         self._window = MainWindow()
 
