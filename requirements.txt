@@ -1,7 +1,7 @@
+# 运行时依赖
 loguru
-urllib3
-serial
 pyserial
-pyqt5
+PyQt5
+PyQt-Fluent-Widgets
 pyvisa
 pyvisa-py

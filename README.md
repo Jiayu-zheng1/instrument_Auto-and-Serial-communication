@@ -56,10 +56,10 @@ python main.py
 ## 项目结构
 
 ```
-Read_data/
+instrument_Auto-and-Serial-communication/
 ├── main.py                          # 入口
 ├── requirements.txt                 # Python 依赖
-├── build.spec                       # PyInstaller 打包配置
+├── visa_demo.py                     # pyvisa 仪器通信演示脚本
 ├── resources/
 │   ├── Main.csv                     # 测试序列（TestName, Function, SubTestName, Running, config）
 │   ├── Limits.csv                   # 判据（SubTestName, LowerLimit, UpperLimit, Unit, Visible）
@@ -343,13 +343,13 @@ system_profiler SPUSBDataType | grep -A 10 "FTDI\|USB-Serial\|CP210"
 
 ## 打包
 
-使用 PyInstaller：
+使用 PyInstaller（`*.spec` 为本地打包配置，已 gitignore）：
 
 ```bash
-pyinstaller build.spec
+pyinstaller --windowed --name instrument_Auto --icon resources/Foxlink.icns --add-data "resources:resources" main.py
 ```
 
-输出 `dist/Read_Data.app`。
+输出 `dist/instrument_Auto.app`。
 
 ## 维护
 

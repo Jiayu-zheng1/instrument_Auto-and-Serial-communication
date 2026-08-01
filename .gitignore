@@ -1,7 +1,26 @@
+# Python
 __pycache__/
-*.pyc
-*.pyo
-.DS_Store
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+
+# 打包产物
+build/
+dist/
+*.spec
+*.app
+
+# IDE
 .idea/
 .vscode/
-*.spec
+
+# 系统文件
+.DS_Store
+
+# 运行时数据
+*.log
+*.db
